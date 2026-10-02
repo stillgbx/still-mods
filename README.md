@@ -18,11 +18,7 @@ Other options:
 - `sounds` (`soft`, `classic`, `off`; default `soft`): the sounds when a bar waits for a decision,
   fails or finishes. `soft` is still-mods' own (made by `tools/make-sounds.py`), `classic` plan-progress'.
 - `timeZone` (default `Europe/Paris`), the zone of the 5-hour reset time.
-- `palette` (default `default`): the colours of the bars and meters, from popular editor themes:
-  `catppuccin-mocha`, `catppuccin-latte`, `dracula`, `alucard`, `night-owl`, `synthwave-84`,
-  `tokyo-night`. Only the mod's drawings change: the app's own colours stay, and since a mod cannot
-  tell whether the app is light or dark, each palette names its variant. A knob's text turns dark
-  on a fill too light for white.
+- `palette` (default `default`): the colours of the bars and meters, see [Palettes](#palettes).
 - `language` (`auto`, `en`, `fr`; default `auto`): the labels' language. `auto` follows Claude Code's `language` setting, then the system locale.
 
 Change them with the `/still-mods` command, which works in the desktop Code tab too (it has no `/config` menu):
@@ -31,6 +27,7 @@ Change them with the `/still-mods` command, which works in the desktop Code tab 
 /still-mods                     show the options
 /still-mods usageMeters off     switch a feature off
 /still-mods timeZone Asia/Tokyo set a text option
+/still-mods palette dracula     pick a palette
 ```
 
 They are also rows in the terminal's `/config` menu. A plugin loaded from a folder has no such rows in
@@ -40,6 +37,30 @@ the desktop app, so `/still-mods` then writes the option in `~/.claude/settings.
 ```json
 "pluginConfigs": { "still-mods": { "options": { "usageMeters": false } } }
 ```
+
+## Palettes
+
+The `palette` option colours what the mod draws, from popular editor themes:
+
+| Palette | Variant | Source |
+| --- | --- | --- |
+| `default` | | still-mods' own colours |
+| `catppuccin-mocha` | dark | [catppuccin/palette](https://github.com/catppuccin/palette) |
+| `catppuccin-latte` | light | [catppuccin/palette](https://github.com/catppuccin/palette) |
+| `dracula` | dark | [Dracula spec](https://draculatheme.com/spec) |
+| `alucard` | light (Dracula's) | [Dracula spec](https://draculatheme.com/spec) |
+| `night-owl` | dark | [sdras/night-owl-vscode-theme](https://github.com/sdras/night-owl-vscode-theme) |
+| `synthwave-84` | dark | [robb0wen/synthwave-vscode](https://github.com/robb0wen/synthwave-vscode) |
+| `tokyo-night` | dark (Storm) | [folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim) |
+
+Each palette sets the plan bars' state colours (running, waiting, error, done) and the meters' fills
+(green, orange, red), track and time marker, with every value taken from the theme's own repository.
+
+- Only the mod's drawings change: a mod cannot restyle the app, so its text and background stay.
+- A mod cannot tell whether the app is light or dark, so each palette names its variant: pick the
+  one that matches the app.
+- A knob's text stays white while it keeps a 3:1 contrast, and turns near black on a lighter fill
+  (pastel palettes such as Catppuccin Mocha).
 
 ## Plan bars
 
