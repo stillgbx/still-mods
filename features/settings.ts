@@ -6,6 +6,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { type Locale, resolveLocale, systemLocale } from './i18n'
+import { PALETTE_NAMES } from './palettes'
 
 const COMMAND = 'still-mods'
 const PLUGIN = 'still-mods'
@@ -32,6 +33,13 @@ const FIELDS: Field[] = [
     label: { en: 'Sounds for decision, error, done', fr: 'Sons de décision, erreur, fin' },
   },
   { name: 'usageMeters', kind: 'boolean', fallback: true, label: { en: 'Context and limit meters', fr: 'Compteurs de contexte et de limites' } },
+  {
+    name: 'palette',
+    kind: 'choice',
+    choices: PALETTE_NAMES,
+    fallback: 'default',
+    label: { en: 'Colours of the bars and meters', fr: 'Couleurs des barres et compteurs' },
+  },
   { name: 'language', kind: 'choice', choices: ['auto', 'en', 'fr'], fallback: 'auto', label: { en: 'Labels language', fr: 'Langue des libellés' } },
   { name: 'timeZone', kind: 'text', fallback: 'Europe/Paris', label: { en: 'Reset time zone (IANA)', fr: 'Fuseau des heures de reset (IANA)' } },
 ]

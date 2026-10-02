@@ -1,6 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { stack } from './band'
+import { palette, type PaletteName } from './palettes'
 import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
 // Usage meters: context, 5-hour and weekly limit usage, adapted from usage-meter by HolyGrail
@@ -54,6 +55,8 @@ const PX_PER_COLUMN = 8
 const METER_GAP = 3
 const BAND_RESERVED_COLUMNS = 2
 const SVG_BAR_HEIGHT = 12
+// set from the palette option when the module registers
+let usesPalette = false
 const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff', tick: 'rgba(0,0,0,0.38)' }
 const MARKER_COLOR = 'cyan'
 
@@ -78,7 +81,10 @@ async function startUsageMeters($: EngineInterface) {
   $.ui.invalidate('ui.render')
 }
 
-export function registerUsageMeters(on: Parameters<Register>[0], options: { timeZone?: string; language?: string }) {
+export function registerUsageMeters(on: Parameters<Register>[0], options: { timeZone?: string; language?: string; palette?: PaletteName }) {
+  const p = palette(options.palette)
+  usesPalette = (options.palette ?? 'default') !== 'default'
+  Object.assign(SVG_COLORS, { success: p.success, warning: p.warning, error: p.danger, track: p.track, marker: p.marker })
   if (options.timeZone) timeZone = options.timeZone
   language = options.language ?? 'auto'
 
@@ -267,7 +273,7 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, lab
         flexDirection: 'row',
         columnGap: 1,
         flexShrink: 0,
-        children: [Text({ bold: true, children: [label] }), Text({ bold: true, ...(known ? { color: status } : { dimColor: true }), children: [percent] })],
+        children: [Text({ bold: true, children: [label] }), Text({ bold: true, ...(known ? { color: textColor(status) } : { dimColor: true }), children: [percent] })],
       }),
       Text({ dimColor: true, wrap: 'truncate', children: [detail] }),
     ],
@@ -291,7 +297,7 @@ function textBar(Text: any, cells: number, used: number, elapsed: number | null,
   const tickCells = new Set(ticks.map(f => Math.round(f * cells)))
   const marker = elapsed == null ? -1 : Math.min(cells - 1, Math.floor((elapsed / 100) * cells))
   const markerStyle = { color: MARKER_COLOR, bold: true }
-  const usedStyle = status ? { color: status } : { dimColor: true }
+  const usedStyle = status ? { color: textColor(status) } : { dimColor: true }
   const restStyle = { dimColor: true }
   const runs: { text: string; style: object }[] = []
   for (let i = 0; i < cells; i++) {
@@ -337,6 +343,12 @@ function svgBar(width: number, used: number, elapsed: number | null, status: str
 function divisionPoints(divisions?: number) {
   if (!divisions || divisions < 2) return []
   return Array.from({ length: divisions - 1 }, (_, i) => (i + 1) / divisions)
+}
+
+// a palette's own hex, else the surface's theme colour of that name (success, warning, error)
+function textColor(status: string | null) {
+  if (!status) return undefined
+  return usesPalette ? SVG_COLORS[status] : status
 }
 
 function clamp(percent: number) {

@@ -1,6 +1,6 @@
 {
   "name": "still-mods",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
   "author": {
     "name": "stillgbx",
@@ -47,6 +47,22 @@
       "title": "Reset time zone",
       "description": "IANA time zone for the 5-hour reset time, such as Europe/Paris",
       "default": "Europe/Paris"
+    },
+    "palette": {
+      "type": "string",
+      "title": "Palette",
+      "description": "Colours of the bars and meters, from popular editor themes (the app's own colours do not change)",
+      "options": [
+        "default",
+        "catppuccin-mocha",
+        "catppuccin-latte",
+        "dracula",
+        "alucard",
+        "night-owl",
+        "synthwave-84",
+        "tokyo-night"
+      ],
+      "default": "default"
     },
     "language": {
       "type": "string",

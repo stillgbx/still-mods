@@ -16,6 +16,11 @@ Other options:
 - `sounds` (`soft`, `classic`, `off`; default `soft`): the sounds when a bar waits for a decision,
   fails or finishes. `soft` is still-mods' own (made by `tools/make-sounds.py`), `classic` plan-progress'.
 - `timeZone` (default `Europe/Paris`), the zone of the 5-hour reset time.
+- `palette` (default `default`): the colours of the bars and meters, from popular editor themes:
+  `catppuccin-mocha`, `catppuccin-latte`, `dracula`, `alucard`, `night-owl`, `synthwave-84`,
+  `tokyo-night`. Only the mod's drawings change: the app's own colours stay, and since a mod cannot
+  tell whether the app is light or dark, each palette names its variant. A knob's text turns dark
+  on a fill too light for white.
 - `language` (`auto`, `en`, `fr`; default `auto`): the labels' language. `auto` follows Claude Code's `language` setting, then the system locale.
 
 Change them with the `/still-mods` command, which works in the desktop Code tab too (it has no `/config` menu):
@@ -71,6 +76,7 @@ weekly limit and the usage credits the desktop panel shows are not available to 
 - `features/settings.ts`: the `/still-mods` command, always on.
 - `features/band.ts`: stacks the parts of the band above the prompt.
 - `features/i18n.ts`: the labels in English and French.
+- `features/palettes.ts`: the colour palettes, each value taken from the theme's own repository.
 - `sounds/<theme>/`: the sound themes; `tools/make-sounds.py` synthesizes `sounds/soft/`.
 
 The engine follows `$` only into functions of the same file, so a feature keeps its hooks and the
@@ -127,5 +133,9 @@ still-mods started from the ideas and the work of two mods, combined here and ex
   that keep the bars up to date.
 - **[usage-meter](https://github.com/HolyGrail/claude-mods)** by HolyGrail: the context and limit
   meters, the readings shared between sessions, the pace colours and the time marker.
+
+The palettes take their values from the themes' own repositories: [Catppuccin](https://github.com/catppuccin/palette),
+[Dracula and Alucard](https://draculatheme.com/spec), [Night Owl](https://github.com/sdras/night-owl-vscode-theme),
+[SynthWave '84](https://github.com/robb0wen/synthwave-vscode) and [Tokyo Night](https://github.com/folke/tokyonight.nvim).
 
 Their notices are in [NOTICE](NOTICE). still-mods itself is under the MIT License ([LICENSE](LICENSE)).

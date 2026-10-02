@@ -5,6 +5,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanStage, PlanState, PlanStep, StepStatus } from '../types'
 import { stack } from './band'
+import { palette, type PaletteName } from './palettes'
 import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
 const TOOL = 'mcp__still-mods__plan_progress'
@@ -19,6 +20,7 @@ const STRIP_GAP = 3
 const MAX_STRIPS = 4 // past this, the finished ones fold into one "+N more" strip
 const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until the bar closes
 
+// set from the palette option when the module registers
 const STATE_COLOR: Record<PlanState, string> = { running: '#8B7CF6', needs_input: '#E09A1E', error: '#E5484D', done: '#30A46C' }
 const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '!', done: '✓' }
 const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
@@ -278,6 +280,17 @@ function currentStep(p: Plan): PlanStep | undefined {
   return steps.find(st => st.status === 'active') ?? steps.find(st => !isFinished(st.status))
 }
 
+// the knob's text colour on a fill: white, or near black on a fill too light for it
+function inkOn(fill: string) {
+  const [r, g, b] = hex(fill).map(v => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  })
+  const lum = 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
+  // white while it keeps 3:1 (WCAG's floor for bold text), as on the default colours; dark past that
+  return 1.05 / (lum + 0.05) >= 3 ? '#fff' : '#1c1b22'
+}
+
 const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
 const mix = (a: number[], b: number[], m: number) => a.map((v, i) => Math.round(v + ((b[i] ?? 0) - v) * m))
 const rgb = (c: number[]) => `rgb(${c.join(',')})`
@@ -361,6 +374,8 @@ function trackSvg(p: Plan, W: number): string {
   // knob: a pill with stage and count, or a round dot with the stage number when narrow
   const isNarrow = W < NARROW
   const color = STATE_COLOR[p.state]
+  // the knob's text and icon: white on a dark fill, near black on a light one (pastel palettes)
+  const ink = inkOn(color)
   const icon = ICON_PATH[p.state]
   const single = p.stages.length === 1
   const number = single ? Math.min(w.total, w.pos + 1) : w.stage + 1
@@ -369,7 +384,7 @@ function trackSvg(p: Plan, W: number): string {
   if (isNarrow) {
     const label = done ? '' : String(number)
     knob = `<circle cx="0" cy="${H / 2}" r="${H / 2}" fill="${color}"/>${
-      done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
+      done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
     }`
   } else {
     // one stage (a todo list): the step at work names the knob; several: the stage at work
@@ -387,7 +402,7 @@ function trackSvg(p: Plan, W: number): string {
     kw = Math.round(20 + iconW + textWidth(shown) + 6 + countW)
     const left = -kw / 2 + 10
     knob = `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>`
-    if (icon) knob += `<path d="${icon}" transform="translate(${left} 5) scale(.5)" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
+    if (icon) knob += `<path d="${icon}" transform="translate(${left} 5) scale(.5)" fill="none" stroke="${ink}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
     knob += `<text x="${left + iconW}" y="${H / 2 + 4.2}" class="kt">${esc(shown)}<tspan class="kc" dx="6">${count}</tspan></text>`
   }
   const clampX = (x: number) => Math.max(kw / 2, Math.min(W - kw / 2, x))
@@ -402,7 +417,7 @@ rect[class]{width:2px;height:2px}
 .t0,.t1,.t2,.t3{animation:tw ${done ? 3.2 : 2.2}s ease-in-out infinite}
 .t1{animation-duration:${done ? 3.8 : 2.8}s;animation-delay:-.7s}.t2{animation-duration:${done ? 4.4 : 1.9}s;animation-delay:-1.3s}.t3{animation-duration:${done ? 3.5 : 3.3}s;animation-delay:-.4s}
 @keyframes tw{0%,100%{opacity:1}50%{opacity:${done ? 0.8 : 0.45}}}
-.kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#fff}
+.kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${ink}}
 .kc{font-weight:400;fill-opacity:.75}
 @media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}
 </style>`
@@ -422,6 +437,12 @@ const AGENT_COLOR: Record<AgentRun['state'], string> = {
   waiting: STATE_COLOR.needs_input,
   done: STATE_COLOR.done,
   error: STATE_COLOR.error,
+}
+
+function applyPalette(name: PaletteName | undefined) {
+  const p = palette(name)
+  Object.assign(STATE_COLOR, { running: p.running, needs_input: p.waiting, error: p.error, done: p.done })
+  Object.assign(AGENT_COLOR, { running: p.running, waiting: p.waiting, error: p.error, done: p.done })
 }
 
 const elapsed = (ms: number) => {
@@ -649,7 +670,8 @@ const WORK_BEFORE_PLAN = 3 // the 4th changing call without a plan is refused on
 const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update before a reminder
 
 
-export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string; sounds?: SoundTheme }) {
+export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string; sounds?: SoundTheme; palette?: PaletteName }) {
+  applyPalette(options.palette)
   enforcement = options.enforcement ?? 'soft'
   soundTheme = options.sounds ?? 'soft'
   language = options.language ?? 'auto'
