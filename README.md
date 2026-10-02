@@ -47,13 +47,20 @@ it as it works. Up to 5 bars show at once; past that, finished ones go first.
 - The fill is the share of finished steps; the pixel texture in it is decoration.
 - Full-height lines mark stage boundaries, short ticks the steps.
 - The knob names the stage at work, or the step at work for a one-stage todo list, with its count.
+- A bar shows what its task cost: the session's cost since the bar opened, fixed when it is done,
+  subagents included (two bars open at once each count the whole interval). The samples of
+  `/still-mods-progress-demo` carry made-up costs. The amounts sit in a column before the percentage, on one line, or as the
+  figure over its currency when the band is too narrow.
 - The colour is the state: running, waiting for a decision, error, done (each with a sound, see `sounds`).
 
 ## Usage meters
 
 One column each for the context, the session (5-hour) limit and the weekly limit: the title and the
 share used, the reset time dimmed at the right (`↻ 32 min · 15:00`), and the bar under them. The
-context shows its tokens instead (`210k / 1M`).
+context shows the session's cost and its tokens instead (`3,42 $ · 210k / 1M`).
+
+The cost is the engine's ledger for the session, at API prices: on a subscription it is what the
+work would cost through the API, not what is billed. Where the host keeps no ledger it is left out.
 
 On a narrow screen (a phone) the meters stack one under the other.
 

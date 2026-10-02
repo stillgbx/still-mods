@@ -6,7 +6,7 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { AgentRun, Plan, PlanStage, PlanState, PlanStep, StepStatus } from '../types'
 import { stack } from './band'
 import { palette, type PaletteName } from './palettes'
-import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
+import { formatUsd, type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
 const TOOL = 'mcp__still-mods__plan_progress'
 const plans = atom({ plugin: 'still-mods', key: 'plans' } as const, [])
@@ -251,13 +251,24 @@ const DEMOS: ((now: number) => Omit<Plan, 'id'>)[] = [
 ]
 
 // a template not on screen yet when one is left, under an id of its own so it adds a bar
-function demoPlan(now: number, shown: Plan[]): Plan {
+// what each sample has cost so far, in US dollars, in the order of DEMOS
+const DEMO_SPENT = [1.27, 0.18, 0.46, 2.35, 0.62]
+
+// a template not on screen yet when one is left, under an id of its own so it adds a bar; its cost
+// is made up: a start that far back in the session's ledger, or the whole for a finished one
+function demoPlan(now: number, shown: Plan[], usd: number | null): Plan {
   const titles = new Set(shown.map(p => p.title))
-  const made = DEMOS.map(make => make(now))
-  const fresh = made.filter(p => !titles.has(p.title))
+  const made = DEMOS.map((make, i) => ({ plan: make(now), spent: DEMO_SPENT[i] ?? 0.5 }))
+  const fresh = made.filter(d => !titles.has(d.plan.title))
   const pool = fresh.length > 0 ? fresh : made
   const pick = pool[Math.floor(Math.random() * pool.length)] ?? made[0]!
-  return { ...pick, id: `demo-${now.toString(36)}` }
+  const isDone = pick.plan.state === 'done'
+  return {
+    ...pick.plan,
+    id: `demo-${now.toString(36)}`,
+    costStart: usd == null ? null : usd - pick.spent,
+    cost: isDone ? pick.spent : null,
+  }
 }
 
 // ---------- drawing ----------
@@ -577,12 +588,36 @@ function chime($: EngineInterface, prev: PlanState | undefined, next: PlanState)
 
 async function putPlan($: EngineInterface, next: Plan) {
   let prev: Plan | undefined
+  const usd = await sessionUsd($)
   await update($, plans, list => {
     prev = list.find(p => p.id === next.id)
-    return placeBar(list, next)
+    // the cost runs from the bar's opening; it is fixed when the bar first turns done
+    const costStart = prev ? (prev.costStart ?? null) : (next.costStart ?? usd)
+    const isDoneNow = next.state === 'done' && prev?.state !== 'done'
+    const cost = next.cost ?? (isDoneNow && costStart != null && usd != null ? usd - costStart : (prev?.cost ?? null))
+    return placeBar(list, { ...next, costStart, cost: next.state === 'done' ? cost : null })
   })
   chime($, prev?.state, next.state)
   if (!prev) await update($, isOpen, () => true)
+}
+
+// an amount as two lines, the figure and then its currency: "2,53 $" or "$2.53" -> ["2,53", "$"]
+function splitCurrency(amount: string) {
+  if (!amount) return []
+  const figure = amount.replace(/\s*\$\s*/, '')
+  return [figure, '$']
+}
+
+// a bar's cost: fixed once it is done, else the session's cost since it opened; null under half a cent
+function spentOn(p: Plan, usdNow: number | null) {
+  const spent = p.state === 'done' ? p.cost : p.costStart != null && usdNow != null ? usdNow - p.costStart : null
+  return spent != null && spent >= 0.005 ? spent : null
+}
+
+// what the session has cost so far in US dollars, or null where the host keeps no ledger
+async function sessionUsd($: EngineInterface) {
+  const usage = await $.session.usage()
+  return typeof usage.cost?.usd === 'number' ? usage.cost.usd : null
 }
 
 // ---------- agents: drawn from engine events alone, no model calls ----------
@@ -841,7 +876,7 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   })
 
   on('command.run', { command: 'still-mods-progress-demo' }, async $ => {
-    await putPlan($, demoPlan(await $.clock.now(), await read($, plans)))
+    await putPlan($, demoPlan(await $.clock.now(), await read($, plans), await sessionUsd($)))
     await update($, isOpen, () => true)
 
     return { text: locale === 'fr' ? 'Barre d’exemple ajoutée au-dessus du prompt.' : 'Sample bar added above the prompt.' }
@@ -1003,8 +1038,18 @@ export async function planBars($: EngineInterface, e: any): Promise<any> {
   // so rows line up whatever their titles; the slack goes into the gap after the title.
   // Desktop reports ~8 CSS px per column; glyph, gaps, percent and the close button take ~126 px.
   const titleWidth = Math.min(Math.round(total * 0.3), Math.max(...list.map(p => Math.round(textWidth(p.title, 6.4)))))
-  const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
   await read($, tick)
+  const usdNow = await sessionUsd($)
+  // the cost column: as wide as the widest amount, kept on one line and right-aligned, its room taken
+  // from the track so every row still lines up
+  const costs = list.map(p => spentOn(p, usdNow)).map(v => (v == null ? '' : formatUsd(locale, v)))
+  const oneLine = Math.max(0, ...costs.map(c => [...c].length))
+  // too narrow for the amounts on one line: the figure above, the currency under it
+  const isTight = oneLine > 0 && total - titleWidth - 140 - (oneLine * 8 + 8) < 120
+  const costLines = costs.map(c => (isTight ? splitCurrency(c) : [c]))
+  const costCells = Math.max(0, ...costLines.flat().map(c => [...c].length))
+  const costPx = costCells > 0 ? costCells * 8 + 8 : 0
+  const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - costPx))
   const now = await $.clock.now()
   // a hairline between task bars, so each bar and its agent strips read as one group
   const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#808080" fill-opacity=".22"/></svg>`
@@ -1044,6 +1089,15 @@ export async function planBars($: EngineInterface, e: any): Promise<any> {
                 <Text color={color}>{` ${stageName} ${w.step}/${w.stageSize}`}</Text>
               </Text>
             )}
+            {costCells > 0 ? (
+              <Box key={`cost-${p.id}`} width={costCells} flexShrink={0} flexDirection="column" alignItems="flex-end">
+                {(costLines[i] ?? []).map((line, n) => (
+                  <Text key={`cost-${p.id}-${n}`} dimColor wrap="truncate">
+                    {line}
+                  </Text>
+                ))}
+              </Box>
+            ) : null}
             <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
             <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
           </Box>,

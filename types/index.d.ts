@@ -21,6 +21,9 @@ export type Plan = {
   state: PlanState
   note: string | null
   startedAt: number
+  // the session's cost when the bar opened, and what the task cost once it is done (US dollars)
+  costStart?: number | null
+  cost?: number | null
   agents?: AgentRun[]
   // when the current batch of agents all finished; their strips fold a few seconds later
   agentsDoneAt?: number | null

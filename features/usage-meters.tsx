@@ -2,12 +2,14 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { stack } from './band'
 import { palette, type PaletteName } from './palettes'
-import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
+import { formatUsd, type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
 // Usage meters: context, 5-hour and weekly limit usage, adapted from usage-meter by HolyGrail
 // (https://github.com/HolyGrail/claude-mods): see NOTICE.
 
 let context: any = null
+// what the session has cost so far, in US dollars; null where the host keeps no ledger
+let costUsd: number | null = null
 let rateLimits: any[] = []
 // when rateLimits was last measured, in $.clock.now() milliseconds
 let measuredAt = 0
@@ -72,6 +74,7 @@ async function startUsageMeters($: EngineInterface) {
   ownKey = KEY_PREFIX + (await $.session.id())
   const usage: any = await $.session.usage()
   context = usage.context
+  costUsd = typeof usage.cost?.usd === 'number' ? usage.cost.usd : null
   if (usage.rateLimits.length > 0) await publishSnapshot($, usage.rateLimits)
   await refresh($)
   ticker = $.clock.every(TICK_MS, async () => {
@@ -121,6 +124,7 @@ export function registerUsageMeters(on: Parameters<Register>[0], options: { time
 
   on('session.measure', async ($, e, next) => {
     context = e.context
+    if (typeof e.cost?.usd === 'number') costUsd = e.cost.usd
     if (e.changed.includes('rateLimits')) await remember($, e.rateLimits as any[])
     $.ui.invalidate('ui.render')
     return next(e)
@@ -237,8 +241,14 @@ function titleOf(kind: string) {
   return typeof L[title] === 'string' ? (L[title] as string) : title
 }
 
-// tokens in the window and its size, as 210k / 1M
+// the session's cost, then the tokens in the window and its size: 3,42 $ · 210k / 1M
 function contextDetail() {
+  const cost = costUsd == null ? '' : formatUsd(locale, costUsd)
+  const tokens = contextTokens()
+  return cost && tokens ? `${cost} · ${tokens}` : cost || tokens
+}
+
+function contextTokens() {
   if (!context?.window) return ''
   const used = typeof context.tokens === 'number' ? context.tokens : typeof context.percent === 'number' ? (context.percent / 100) * context.window : null
   return used == null ? formatTokens(context.window) : formatTokens(used) + ' / ' + formatTokens(context.window)

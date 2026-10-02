@@ -58,6 +58,12 @@ export function resolveLocale(...candidates: unknown[]): Locale {
   return 'en'
 }
 
+// a cost in US dollars, as the locale writes it: 3,42 $ or $3.42
+export function formatUsd(locale: Locale, usd: number) {
+  const digits = usd < 10 ? 2 : usd < 100 ? 1 : 0
+  return locale === 'fr' ? `${usd.toFixed(digits).replace('.', ',')} $` : `$${usd.toFixed(digits)}`
+}
+
 // the locale the environment's Intl reports, often the system's
 export function systemLocale(): string | undefined {
   try {
