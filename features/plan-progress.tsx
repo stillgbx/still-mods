@@ -1,3 +1,5 @@
+// Plan progress bars, from plan-progress by Kirill Serditov (https://github.com/zycck/claude-mods, MIT):
+// see NOTICE. Combined into still-mods with options, translations and a few additions.
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 

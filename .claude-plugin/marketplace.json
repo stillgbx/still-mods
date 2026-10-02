@@ -11,7 +11,7 @@
     {
       "name": "still-mods",
       "source": "./",
-      "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
+      "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters. Built on plan-progress (Kirill Serditov) and usage-meter (HolyGrail)",
       "version": "0.4.0",
       "author": {
         "name": "stillgbx"

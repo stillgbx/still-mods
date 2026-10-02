@@ -113,5 +113,12 @@ claude plugin validate .                              # the marketplace
 
 ## Credits
 
-- Plan bars: based on [plan-progress](https://github.com/zycck/claude-mods) 0.3.0 by Kirill Serditov (MIT).
-- Usage meters: based on [usage-meter](https://github.com/HolyGrail/claude-mods) 0.1.0 by HolyGrail.
+still-mods started from the ideas and the work of two mods, combined here and extended:
+
+- **[plan-progress](https://github.com/zycck/claude-mods)** by Kirill Serditov (MIT): the plan
+  progress bars, their drawing, the `plan_progress` tool, the agent strips, the sounds and the rules
+  that keep the bars up to date.
+- **[usage-meter](https://github.com/HolyGrail/claude-mods)** by HolyGrail: the context and limit
+  meters, the readings shared between sessions, the pace colours and the time marker.
+
+Their notices are in [NOTICE](NOTICE). still-mods itself is under the MIT License ([LICENSE](LICENSE)).

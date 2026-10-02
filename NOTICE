@@ -1,0 +1,43 @@
+still-mods
+Copyright (c) 2026 stillgbx
+
+still-mods started from the ideas and the work of two Claude Code mods. Their authors keep the
+credit for what they designed; the code here was combined, reorganised and extended from theirs.
+
+------------------------------------------------------------------------------------------------
+plan-progress, by Kirill Serditov
+https://github.com/zycck/claude-mods (plugins/plan-progress, version 0.3.0)
+
+The plan progress bars (features/plan-progress.tsx, skills/plan-progress, sounds/) come from
+plan-progress: the bar drawing, the plan_progress tool, the agent strips, the sounds and the rules
+that keep the bars up to date. It is used under the MIT License below.
+
+MIT License
+
+Copyright (c) 2026 Kirill Serditov
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------------------------
+usage-meter, by HolyGrail
+https://github.com/HolyGrail/claude-mods (plugins/usage-meter, version 0.1.0)
+
+The usage meters (features/usage-meters.tsx) come from usage-meter: reading the context and the
+rate-limit windows, sharing readings between sessions through the store, the pace colours and the
+time marker. Its repository states no license; all rights to that work remain with its author.

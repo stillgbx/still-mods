@@ -3,7 +3,8 @@ import type { EngineInterface, Register } from 'claude-code'
 import { stack } from './band'
 import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
-// Usage meters: context, 5-hour and weekly limit usage, adapted from HolyGrail's usage-meter
+// Usage meters: context, 5-hour and weekly limit usage, adapted from usage-meter by HolyGrail
+// (https://github.com/HolyGrail/claude-mods): see NOTICE.
 
 let context: any = null
 let rateLimits: any[] = []
