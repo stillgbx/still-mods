@@ -21,6 +21,9 @@ const STRINGS = {
     ctx: 'Context',
     fiveHour: 'Session',
     sevenDay: 'Week',
+    cache: 'Cache',
+    warm: (d: string) => `warm · ${d}`,
+    cold: 'cold, the next message re-caches',
   },
   fr: {
     done: 'Terminé',
@@ -38,6 +41,9 @@ const STRINGS = {
     ctx: 'Contexte',
     fiveHour: 'Session',
     sevenDay: 'Semaine',
+    cache: 'Cache',
+    warm: (d: string) => `chaud · ${d}`,
+    cold: 'froid, le prochain message recache',
   },
 } as const
 

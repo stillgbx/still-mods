@@ -35,6 +35,8 @@ const FIELDS: Field[] = [
   { name: 'turnNotify', kind: 'boolean', fallback: true, label: { en: 'Sound and toast when a long turn ends', fr: 'Son et notification à la fin d’un long tour' } },
   { name: 'turnNotifySeconds', kind: 'number', fallback: 60, label: { en: 'Seconds a turn must last to notify', fr: 'Durée minimale du tour pour notifier (s)' } },
   { name: 'gitStatus', kind: 'boolean', fallback: true, label: { en: 'Git status line (branch, changes, ahead/behind)', fr: 'Ligne d’état git (branche, modifs, avance/retard)' } },
+  { name: 'cacheMeter', kind: 'boolean', fallback: true, label: { en: 'Prompt cache column (hit rate, time left)', fr: 'Colonne cache (taux, temps restant)' } },
+  { name: 'cacheTtl', kind: 'choice', choices: ['1h', '5m'], fallback: '1h', label: { en: 'Prompt cache lifetime', fr: 'Durée de vie du cache' } },
   { name: 'usageMeters', kind: 'boolean', fallback: true, label: { en: 'Context and limit meters', fr: 'Compteurs de contexte et de limites' } },
   {
     name: 'palette',

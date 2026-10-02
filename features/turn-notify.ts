@@ -11,19 +11,23 @@ let thresholdMs = 60_000
 let theme: Theme = 'soft'
 let language = 'auto'
 let locale: Locale = 'en'
-// when each turn of the main thread began, and the session's cost then
-const turns = new Map<string, { startedAt: number; usd: number | null }>()
+// when each turn of the main thread began, the session's cost then, and the time its model requests took
+const turns = new Map<string, { startedAt: number; usd: number | null; modelMs: number }>()
 // tool calls that were asked about, so a quick settle by the mode stays silent
 const asked = new Set<string>()
 
 const TEXT = {
   en: {
     done: (time: string, cost: string) => `Claude finished in ${time}${cost ? ' · ' + cost : ''}`,
+    split: (model: string, tools: string) => `model ${model}, tools ${tools}`,
+    speed: (n: number) => `${n} tok/s`,
     failed: (time: string) => `Claude stopped on an error after ${time}`,
     refused: (time: string) => `Claude declined to go on after ${time}`,
   },
   fr: {
     done: (time: string, cost: string) => `Claude a terminé en ${time}${cost ? ' · ' + cost : ''}`,
+    split: (model: string, tools: string) => `modèle ${model}, outils ${tools}`,
+    speed: (n: number) => `${n} tok/s`,
     failed: (time: string) => `Claude s'est arrêté sur une erreur après ${time}`,
     refused: (time: string) => `Claude a refusé de continuer après ${time}`,
   },
@@ -43,8 +47,17 @@ export function registerTurnNotify(on: Parameters<Register>[0], options: { secon
 
   // matchers that take every value, so the plan bars may hook these events too
   on('turn.start', { turnId: /^/ }, async ($, e, next) => {
-    turns.set(e.turnId, { startedAt: await $.clock.now(), usd: await sessionUsd($) })
+    turns.set(e.turnId, { startedAt: await $.clock.now(), usd: await sessionUsd($), modelMs: 0 })
     return next(e)
+  })
+
+  // each model request of a main-thread turn, timed from its ask to its last chunk
+  on('turn.step', { index: /^/ }, async function* ($, e, next) {
+    const turn = e.agentId ? undefined : turns.get(e.turnId)
+    const started = await $.clock.now()
+    const result = yield* next(e)
+    if (turn) turn.modelMs += (await $.clock.now()) - started
+    return result
   })
 
   on('turn.complete', { reason: /^/ }, async ($, e, next) => {
@@ -61,7 +74,13 @@ export function registerTurnNotify(on: Parameters<Register>[0], options: { secon
       const usd = await sessionUsd($)
       const cost = usd != null && start.usd != null && usd - start.usd >= 0.005 ? formatUsd(locale, usd - start.usd) : ''
       play($, 'done')
-      $.ui.toast(T.done(time, cost))
+      // the rest of the turn is the tools and whatever waited between requests
+      const toolsMs = Math.max(0, took - start.modelMs)
+      const output = e.usage?.output_tokens ?? 0
+      const speed = start.modelMs > 0 && output > 0 ? Math.round(output / (start.modelMs / 1000)) : 0
+      const extra = [start.modelMs > 0 ? T.split(formatDuration(start.modelMs), formatDuration(toolsMs)) : '', speed > 0 ? T.speed(speed) : '']
+      const detail = extra.filter(Boolean).join(' · ')
+      $.ui.toast(T.done(time, cost) + (detail ? `\n${detail}` : ''), { timeoutMs: 8000 })
     } else {
       play($, 'error')
       $.ui.toast(e.reason === 'refusal' ? T.refused(time) : T.failed(time))

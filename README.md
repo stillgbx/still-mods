@@ -5,9 +5,9 @@ Personal Claude Code mods, in one plugin. Each feature can be switched on or off
 | Feature | Option | What it draws |
 | --- | --- | --- |
 | Plan progress | `planProgress` | Progress bars for multi-step tasks (stages, steps, subagent strips, sounds), above the prompt, on top |
-| End-of-turn notice | `turnNotify` | When a turn ran longer than `turnNotifySeconds` (60 by default): the done sound and a toast, `Claude a terminé en 4 min 12 s · 0,82 $`; the decision sound when a call waits on your approval |
+| End-of-turn notice | `turnNotify` | When a turn ran longer than `turnNotifySeconds` (60 by default): the done sound and a toast, `Claude a terminé en 4 min 12 s · 0,82 $` over `modèle 2 min 30 s, outils 1 min 42 s · 68 tok/s`; the decision sound when a call waits on your approval |
 | Git status | `gitStatus` | The status line under the prompt: branch, changed and new files, ahead/behind its upstream (`⎇ main · 3 modifiés · 1 nouveau · ↑1`) |
-| Usage meters | `usageMeters` | Context, session (5-hour) and weekly limits, always at the bottom: one column each, the share used and the reset time on one line, the bar under it |
+| Usage meters | `usageMeters` | Context, prompt cache, session (5-hour) and weekly limits, always at the bottom: the share used and the detail on one line, the bar under it |
 
 Other options:
 
@@ -85,11 +85,19 @@ context shows the session's cost and its tokens instead (`3,42 $ · 210k / 1M`).
 The cost is the engine's ledger for the session, at API prices: on a subscription it is what the
 work would cost through the API, not what is billed. Where the host keeps no ledger it is left out.
 
-On a narrow screen (a phone) the meters stack one under the other.
+The meters sit on as few rows as keep every title, figure and detail whole, the rows balanced: one
+row of four on a wide band, two by two on a medium one, one per row on a phone.
 
 Thin cuts split the session bar into its 5 hours and the weekly bar into its 7 days, counted from
 the window's start: the fill against them tells whether usage keeps to the average. The context bar
 has a cut at every 10 % from 50 %.
+
+A **Cache** column (option `cacheMeter`) follows the context. Its figure is the share of the last
+main-thread response's input the prompt cache served: green from 80 %, orange from 50 %, red under. A
+drop means something broke the cache (tools, model or instructions changed). Its bar is the time the
+cache has left since that response, draining, orange in its last 15 %: `chaud · 41 min`, then `froid`
+once it expired, when the next message writes the whole context to the cache again. The lifetime is
+the `cacheTtl` option (`1h` by default, or `5m`): the engine does not say it at any time.
 
 The blue line is the time gone in the window. A fill short of it means the limit lasts until the
 reset; a fill past it means usage runs ahead of time. The colour says the same: green at least 10

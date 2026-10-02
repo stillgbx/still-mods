@@ -62,7 +62,30 @@ let usesPalette = false
 const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff', tick: 'rgba(0,0,0,0.38)' }
 const MARKER_COLOR = 'cyan'
 
-type Meter = { key: string; label: string; used: number | undefined; elapsed: number | null; detail: string; ticks?: number[] }
+type Meter = {
+  key: string
+  label: string
+  used: number | undefined
+  elapsed: number | null
+  detail: string
+  ticks?: number[]
+  // a figure and a colour of their own, where the bar measures something else (the cache)
+  percent?: string
+  status?: string | null
+  barStatus?: string
+}
+
+// the main thread's prompt cache: the share of the last response's input it served, and when that
+// response came, from which the cache's time to live runs; kept per session in the store
+let cacheTtlMs = HOUR_MS
+// the cacheMeter option
+let cacheShown = true
+let cacheRate: number | null = null
+let lastResponseAt: number | null = null
+let cacheKey: string | null = null
+const CACHE_PREFIX = 'cache:'
+// the cache counts as nearly gone in the last part of its life
+const CACHE_LOW_SHARE = 0.15
 
 // session.start fires again on a reload: the store stays, these variables start over
 async function startUsageMeters($: EngineInterface) {
@@ -72,6 +95,7 @@ async function startUsageMeters($: EngineInterface) {
   rateLimits = []
   measuredAt = 0
   ownKey = KEY_PREFIX + (await $.session.id())
+  await loadCache($)
   const usage: any = await $.session.usage()
   context = usage.context
   costUsd = typeof usage.cost?.usd === 'number' ? usage.cost.usd : null
@@ -84,7 +108,9 @@ async function startUsageMeters($: EngineInterface) {
   $.ui.invalidate('ui.render')
 }
 
-export function registerUsageMeters(on: Parameters<Register>[0], options: { timeZone?: string; language?: string; palette?: PaletteName }) {
+export function registerUsageMeters(on: Parameters<Register>[0], options: { timeZone?: string; language?: string; palette?: PaletteName; cacheTtl?: '5m' | '1h'; cacheMeter?: boolean }) {
+  cacheTtlMs = options.cacheTtl === '5m' ? 5 * 60_000 : HOUR_MS
+  cacheShown = options.cacheMeter !== false
   const p = palette(options.palette)
   usesPalette = (options.palette ?? 'default') !== 'default'
   Object.assign(SVG_COLORS, { success: p.success, warning: p.warning, error: p.danger, track: p.track, marker: p.marker })
@@ -118,8 +144,22 @@ export function registerUsageMeters(on: Parameters<Register>[0], options: { time
       ownKey = key
     }
     context = ((await $.session.usage()) as any).context
+    const since = (e as unknown as { seconds_since_last_response?: number }).seconds_since_last_response
+    if (typeof since === 'number') await saveCache($, cacheRate, (await $.clock.now()) - since * 1000)
     $.ui.invalidate('ui.render')
     return next(e)
+  })
+
+  // each response of the main thread: how much of its input the cache served, and the time it came
+  on('turn.step', { turnId: /^/ }, async function* ($, e, next) {
+    const result = yield* next(e)
+    const usage = result.usage
+    if (!e.agentId && usage) {
+      const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+      await saveCache($, input > 0 ? (usage.cache_read_input_tokens / input) * 100 : cacheRate, await $.clock.now())
+      $.ui.invalidate('ui.render')
+    }
+    return result
   })
 
   on('session.measure', async ($, e, next) => {
@@ -136,6 +176,7 @@ async function usageMeters($: EngineInterface, e: any): Promise<any> {
   const now = await $.clock.now()
   const L = strings(locale)
   const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail(), ticks: CONTEXT_TICKS }]
+  if (cacheShown) meters.push(cacheMeter(now))
   for (const limit of rateLimits) meters.push(readLimit(limit, now))
   // the windows arrive with the first API response; until then they show as unknown
   for (const kind of ALWAYS_SHOWN) {
@@ -143,17 +184,23 @@ async function usageMeters($: EngineInterface, e: any): Promise<any> {
   }
   const columns = e.props.bodyColumns ?? 0
   const room = columns - BAND_RESERVED_COLUMNS
-  // side by side when every column gets its minimum, else one under the other (a phone)
-  const isRow = room - METER_GAP * (meters.length - 1) >= MIN_BAR_CELLS * meters.length
-  const cells = isRow ? Math.floor((room - METER_GAP * (meters.length - 1)) / meters.length) : Math.max(MIN_BAR_CELLS, room)
+  // as many meters on a row as fit whole, their title, figure and detail untruncated; the rows
+  // balanced (4 meters as 2 + 2, not 3 + 1), down to one per row on a phone
+  const need = Math.max(MIN_BAR_CELLS, ...meters.map(widthOf))
+  const fit = Math.max(1, Math.min(meters.length, Math.floor((room + METER_GAP) / (need + METER_GAP))))
+  const rowCount = Math.ceil(meters.length / fit)
+  const perRow = Math.ceil(meters.length / rowCount)
+  const cells = Math.max(MIN_BAR_CELLS, Math.floor((room - METER_GAP * (perRow - 1)) / perRow))
   const gauge = 'Svg' in elements ? 'svg' : 'text'
+  const rows = Array.from({ length: rowCount }, (_, r) => meters.slice(r * perRow, (r + 1) * perRow))
   // equal columns from edge to edge, each two lines: the figures, then the bar
   return elements.Box({
     key: 'usage-meters',
-    flexDirection: isRow ? 'row' : 'column',
-    columnGap: METER_GAP,
+    flexDirection: 'column',
     rowGap: 1,
-    children: meters.map(m => meter(elements, gauge, cells, m)),
+    children: rows.map((row, r) =>
+      elements.Box({ key: `meters-row-${r}`, flexDirection: 'row', columnGap: METER_GAP, children: row.map(m => meter(elements, gauge, cells, m)) }),
+    ),
   })
 }
 
@@ -235,6 +282,48 @@ function readLimit(limit: any, now: number): Meter {
   return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail, ticks: divisionPoints(window?.divisions) }
 }
 
+// the cache column: its hit rate as the figure, the time it has left as the bar, which drains
+function cacheMeter(now: number): Meter {
+  const L = strings(locale)
+  const rate = cacheRate == null ? '—' : Math.round(cacheRate) + '%'
+  const rateStatus = cacheRate == null ? null : cacheRate >= 80 ? 'success' : cacheRate >= 50 ? 'warning' : 'error'
+  if (lastResponseAt == null) return { key: 'cache', label: L.cache, used: undefined, elapsed: null, detail: L.waiting, percent: rate, status: rateStatus }
+  const left = lastResponseAt + cacheTtlMs - now
+  if (left <= 0) return { key: 'cache', label: L.cache, used: 0, elapsed: null, detail: L.cold, percent: rate, status: rateStatus }
+  const share = (left / cacheTtlMs) * 100
+  return {
+    key: 'cache',
+    label: L.cache,
+    used: share,
+    elapsed: null,
+    detail: L.warm(untilReset(left)),
+    percent: rate,
+    status: rateStatus,
+    // the bar's own colour: green while it has time, orange near the end
+    barStatus: share / 100 <= CACHE_LOW_SHARE ? 'warning' : 'success',
+  }
+}
+
+async function loadCache($: EngineInterface) {
+  cacheKey = CACHE_PREFIX + (await $.session.id())
+  const saved: any = await $.store.get(cacheKey)
+  cacheRate = typeof saved?.rate === 'number' ? saved.rate : null
+  lastResponseAt = typeof saved?.at === 'number' ? saved.at : null
+  // other sessions' readings past any cache's life say nothing; their keys go
+  const cutoff = (await $.clock.now()) - 2 * HOUR_MS
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith(CACHE_PREFIX) || key === cacheKey) continue
+    const other: any = await $.store.get(key)
+    if (typeof other?.at !== 'number' || other.at < cutoff) await $.store.delete(key)
+  }
+}
+
+async function saveCache($: EngineInterface, rate: number | null, at: number) {
+  cacheRate = rate
+  lastResponseAt = at
+  if (cacheKey) await $.store.set(cacheKey, { rate, at })
+}
+
 function titleOf(kind: string) {
   const title = WINDOWS[kind]?.title ?? kind
   const L = strings(locale) as Record<string, unknown>
@@ -269,11 +358,20 @@ function statusOf(used: number, elapsed: number | null) {
   return 'success'
 }
 
+// the cells a meter's first line takes whole: title, figure, two spaces, detail
+function widthOf(m: Meter) {
+  const percent = m.percent ?? (typeof m.used === 'number' ? Math.round(m.used) + '%' : '—')
+  return [...m.label].length + 1 + [...percent].length + 2 + [...m.detail].length
+}
+
 // two lines in one column: the title and the share used, the reset dimmed at the right; then the bar
-function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, label, used, elapsed, detail, ticks }: Meter) {
+function meter({ Box, Text, Svg }: any, gauge: string, cells: number, m: Meter) {
+  const { key, label, used, elapsed, detail, ticks } = m
   const known = typeof used === 'number'
-  const status = known ? statusOf(used, elapsed) : null
-  const percent = known ? Math.round(used) + '%' : '—'
+  const barStatus = m.barStatus ?? (known ? statusOf(used, elapsed) : null)
+  const status = m.status !== undefined ? m.status : barStatus
+  const percent = m.percent ?? (known ? Math.round(used) + '%' : '—')
+  const hasFigure = m.percent !== undefined ? m.percent !== '—' : known
   const head = Box({
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -283,7 +381,7 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, lab
         flexDirection: 'row',
         columnGap: 1,
         flexShrink: 0,
-        children: [Text({ bold: true, children: [label] }), Text({ bold: true, ...(known ? { color: textColor(status) } : { dimColor: true }), children: [percent] })],
+        children: [Text({ bold: true, children: [label] }), Text({ bold: true, ...(hasFigure ? { color: textColor(status) } : { dimColor: true }), children: [percent] })],
       }),
       Text({ dimColor: true, wrap: 'truncate', children: [detail] }),
     ],
@@ -291,12 +389,12 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, lab
   const bar =
     gauge === 'svg'
       ? Svg({
-          source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, status, ticks),
+          source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, barStatus, ticks),
           alt: `${label} ${percent}${detail ? ', ' + detail : ''}${elapsed == null ? '' : ', ' + Math.round(elapsed) + '%'}`,
           width: cells * PX_PER_COLUMN,
           height: SVG_BAR_HEIGHT,
         })
-      : textBar(Text, cells, known ? used : 0, elapsed, status, ticks)
+      : textBar(Text, cells, known ? used : 0, elapsed, barStatus, ticks)
   return Box({ key: 'meter-' + key, flexDirection: 'column', width: cells, flexShrink: 0, children: [head, bar] })
 }
 
