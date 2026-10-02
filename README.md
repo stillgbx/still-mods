@@ -73,6 +73,10 @@ context shows its tokens instead (`210k / 1M`).
 
 On a narrow screen (a phone) the meters stack one under the other.
 
+Thin cuts split the session bar into its 5 hours and the weekly bar into its 7 days, counted from
+the window's start: the fill against them tells whether usage keeps to the average. The context bar
+has a cut at every 10 % from 50 %.
+
 The blue line is the time gone in the window. A fill short of it means the limit lasts until the
 reset; a fill past it means usage runs ahead of time. The colour says the same: green at least 10
 points behind the line (or under 10 % used), orange close to it or a little past, red more than 15

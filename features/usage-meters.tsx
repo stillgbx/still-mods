@@ -30,11 +30,14 @@ let language = 'auto'
 let locale: Locale = 'en'
 
 // title: a key of the labels, or the label itself; showsDay adds the weekday to the reset time
-const WINDOWS: Record<string, { title: string; ms?: number; showsDay?: boolean }> = {
-  five_hour: { title: 'fiveHour', ms: 5 * HOUR_MS },
-  seven_day: { title: 'sevenDay', ms: 7 * 24 * HOUR_MS, showsDay: true },
+// divisions: the bar is cut in that many equal parts, one per hour or per day of the window
+const WINDOWS: Record<string, { title: string; ms?: number; showsDay?: boolean; divisions?: number }> = {
+  five_hour: { title: 'fiveHour', ms: 5 * HOUR_MS, divisions: 5 },
+  seven_day: { title: 'sevenDay', ms: 7 * 24 * HOUR_MS, showsDay: true, divisions: 7 },
   spend_limit: { title: '$' },
 }
+// the context bar's cuts: every tenth from half full, where the window starts to matter
+const CONTEXT_TICKS = [0.5, 0.6, 0.7, 0.8, 0.9]
 // shown even before any reading, so the band keeps its shape from the first frame
 const ALWAYS_SHOWN = ['five_hour', 'seven_day']
 
@@ -51,10 +54,10 @@ const PX_PER_COLUMN = 8
 const METER_GAP = 3
 const BAND_RESERVED_COLUMNS = 2
 const SVG_BAR_HEIGHT = 12
-const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff' }
+const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff', tick: 'rgba(0,0,0,0.38)' }
 const MARKER_COLOR = 'cyan'
 
-type Meter = { key: string; label: string; used: number | undefined; elapsed: number | null; detail: string }
+type Meter = { key: string; label: string; used: number | undefined; elapsed: number | null; detail: string; ticks?: number[] }
 
 // session.start fires again on a reload: the store stays, these variables start over
 async function startUsageMeters($: EngineInterface) {
@@ -122,7 +125,7 @@ async function usageMeters($: EngineInterface, e: any): Promise<any> {
   const elements: any = $.ui.resolve(e)
   const now = await $.clock.now()
   const L = strings(locale)
-  const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail() }]
+  const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail(), ticks: CONTEXT_TICKS }]
   for (const limit of rateLimits) meters.push(readLimit(limit, now))
   // the windows arrive with the first API response; until then they show as unknown
   for (const kind of ALWAYS_SHOWN) {
@@ -216,10 +219,10 @@ function readLimit(limit: any, now: number): Meter {
   const label = titleOf(limit.kind)
   const resetsAtMs = limit.resetsAt == null ? null : Date.parse(limit.resetsAt)
   // a window that has reset since the last reading starts again from zero
-  if (resetsAtMs != null && resetsAtMs <= now) return { key: limit.kind, label, used: 0, elapsed: window?.ms ? 0 : null, detail: '' }
+  if (resetsAtMs != null && resetsAtMs <= now) return { key: limit.kind, label, used: 0, elapsed: window?.ms ? 0 : null, detail: '', ticks: divisionPoints(window?.divisions) }
   const elapsed = window?.ms && resetsAtMs != null ? clamp(100 - ((resetsAtMs - now) / window.ms) * 100) : null
   const detail = resetsAtMs == null ? '' : strings(locale).resetsIn(untilReset(resetsAtMs - now)) + ' · ' + resetClock(resetsAtMs, window?.showsDay === true)
-  return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail }
+  return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail, ticks: divisionPoints(window?.divisions) }
 }
 
 function titleOf(kind: string) {
@@ -251,7 +254,7 @@ function statusOf(used: number, elapsed: number | null) {
 }
 
 // two lines in one column: the title and the share used, the reset dimmed at the right; then the bar
-function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, label, used, elapsed, detail }: Meter) {
+function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, label, used, elapsed, detail, ticks }: Meter) {
   const known = typeof used === 'number'
   const status = known ? statusOf(used, elapsed) : null
   const percent = known ? Math.round(used) + '%' : '—'
@@ -272,25 +275,32 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, lab
   const bar =
     gauge === 'svg'
       ? Svg({
-          source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, status),
+          source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, status, ticks),
           alt: `${label} ${percent}${detail ? ', ' + detail : ''}${elapsed == null ? '' : ', ' + Math.round(elapsed) + '%'}`,
           width: cells * PX_PER_COLUMN,
           height: SVG_BAR_HEIGHT,
         })
-      : textBar(Text, cells, known ? used : 0, elapsed, status)
+      : textBar(Text, cells, known ? used : 0, elapsed, status, ticks)
   return Box({ key: 'meter-' + key, flexDirection: 'column', width: cells, flexShrink: 0, children: [head, bar] })
 }
 
 // used cells in the status color, the rest dim, and the time marker
-function textBar(Text: any, cells: number, used: number, elapsed: number | null, status: string | null) {
+function textBar(Text: any, cells: number, used: number, elapsed: number | null, status: string | null, ticks: number[] = []) {
   const filled = Math.round((clamp(used) / 100) * cells)
+  // the cells of the cuts, shown on the unused part only
+  const tickCells = new Set(ticks.map(f => Math.round(f * cells)))
   const marker = elapsed == null ? -1 : Math.min(cells - 1, Math.floor((elapsed / 100) * cells))
   const markerStyle = { color: MARKER_COLOR, bold: true }
   const usedStyle = status ? { color: status } : { dimColor: true }
   const restStyle = { dimColor: true }
   const runs: { text: string; style: object }[] = []
   for (let i = 0; i < cells; i++) {
-    const cell = i === marker ? { char: '┃', style: markerStyle } : i < filled ? { char: '█', style: usedStyle } : { char: '░', style: restStyle }
+    const cell =
+      i === marker
+        ? { char: '┃', style: markerStyle }
+        : i < filled
+          ? { char: '█', style: usedStyle }
+          : { char: tickCells.has(i) ? '┊' : '░', style: restStyle }
     const last = runs.at(-1)
     if (last && last.style === cell.style) last.text += cell.char
     else runs.push({ text: cell.char, style: cell.style })
@@ -298,8 +308,9 @@ function textBar(Text: any, cells: number, used: number, elapsed: number | null,
   return Text({ children: runs.map(run => Text({ ...run.style, children: [run.text] })) })
 }
 
-// a rounded track with the used share and, for a timed window, a marker at the time gone
-function svgBar(width: number, used: number, elapsed: number | null, status: string | null) {
+// a rounded track with the used share, thin cuts (each hour or day, or the context's upper tenths),
+// and for a timed window a marker at the time gone
+function svgBar(width: number, used: number, elapsed: number | null, status: string | null, ticks: number[] = []) {
   const height = SVG_BAR_HEIGHT
   const barH = 6
   const y = (height - barH) / 2
@@ -312,6 +323,7 @@ function svgBar(width: number, used: number, elapsed: number | null, status: str
     `<rect y="${y}" width="${width}" height="${barH}" fill="${SVG_COLORS.track}"/>`,
   ]
   if (fill > 0) parts.push(`<rect y="${y}" width="${fill}" height="${barH}" fill="${SVG_COLORS[status ?? 'success']}"/>`)
+  for (const f of ticks) parts.push(`<rect x="${(f * width - 0.5).toFixed(1)}" y="${y}" width="1" height="${barH}" fill="${SVG_COLORS.tick}"/>`)
   parts.push('</g>')
   if (elapsed != null) {
     const x = Math.min(width - 2, Math.max(0, Math.round((elapsed / 100) * width) - 1))
@@ -319,6 +331,12 @@ function svgBar(width: number, used: number, elapsed: number | null, status: str
   }
   parts.push('</svg>')
   return parts.join('')
+}
+
+// where the window's hours or days begin, as shares of the bar, the ends left out
+function divisionPoints(divisions?: number) {
+  if (!divisions || divisions < 2) return []
+  return Array.from({ length: divisions - 1 }, (_, i) => (i + 1) / divisions)
 }
 
 function clamp(percent: number) {
