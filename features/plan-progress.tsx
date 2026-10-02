@@ -720,7 +720,7 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const bars = await planBars($, e)
     const rest = await next(e)
-    return stack($.ui.resolve(e).Box, [bars, rest]) ?? rest
+    return stack($.ui.resolve(e).Box, [['plan-bars', bars], ['below-plans', rest]]) ?? rest
   })
 
   // per-turn bookkeeping; module variables are fine here, a reload just starts a fresh count

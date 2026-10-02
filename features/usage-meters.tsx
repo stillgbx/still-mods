@@ -101,7 +101,7 @@ export function registerUsageMeters(on: Parameters<Register>[0], options: { time
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const rest = await next(e)
     const meters = await usageMeters($, e)
-    return stack($.ui.resolve(e).Box, [rest, meters]) ?? rest
+    return stack($.ui.resolve(e).Box, [['above-meters', rest], ['usage-meters', meters]]) ?? rest
   })
   on('session.end', async ($, e, next) => {
     if (!FINAL_REASONS.includes(e.reason) || !ownKey) return next(e)
