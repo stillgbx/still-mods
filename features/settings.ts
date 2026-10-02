@@ -32,6 +32,19 @@ const FIELDS: Field[] = [
     label: { en: 'Sounds for decision, error, done', fr: 'Sons de décision, erreur, fin' },
   },
   { name: 'usageMeters', kind: 'boolean', fallback: true, label: { en: 'Context and limit meters', fr: 'Compteurs de contexte et de limites' } },
+  {
+    name: 'agentsPane',
+    kind: 'choice',
+    choices: ['auto', 'manual', 'off'],
+    fallback: 'auto',
+    label: { en: 'Agents pane (auto opens when an agent starts)', fr: 'Panneau Agents (auto : s’ouvre au lancement d’un agent)' },
+  },
+  {
+    name: 'agentsSessionsDir',
+    kind: 'text',
+    fallback: '_generated-ai-doc/sessions',
+    label: { en: 'Team session folders, from the project', fr: 'Dossiers de session de l’équipe, depuis le projet' },
+  },
   { name: 'language', kind: 'choice', choices: ['auto', 'en', 'fr'], fallback: 'auto', label: { en: 'Labels language', fr: 'Langue des libellés' } },
   { name: 'timeZone', kind: 'text', fallback: 'Europe/Paris', label: { en: 'Reset time zone (IANA)', fr: 'Fuseau des heures de reset (IANA)' } },
 ]
@@ -40,7 +53,7 @@ const TEXT = {
   en: {
     title: 'still-mods options',
     change: `Change one: /${COMMAND} <option> <value>, e.g. /${COMMAND} usageMeters off`,
-    commands: `Commands: /${COMMAND}-progress (show or hide the bars), /${COMMAND}-progress-demo, /${COMMAND}-progress-clear, /${COMMAND}-progress-sounds`,
+    commands: `Commands: /${COMMAND}-agents (the Agents pane), /${COMMAND}-progress (show or hide the bars), /${COMMAND}-progress-demo, /${COMMAND}-progress-clear, /${COMMAND}-progress-sounds`,
     unknown: (f: string) => `Unknown option "${f}".`,
     needs: (f: string, v: string) => `"${f}" takes ${v}.`,
     notChanged: (f: string, why: string) => `${f} not changed: ${why}`,
@@ -53,7 +66,7 @@ const TEXT = {
   fr: {
     title: 'Options de still-mods',
     change: `Pour changer : /${COMMAND} <option> <valeur>, ex. /${COMMAND} usageMeters off`,
-    commands: `Commandes : /${COMMAND}-progress (afficher ou masquer les barres), /${COMMAND}-progress-demo, /${COMMAND}-progress-clear, /${COMMAND}-progress-sounds`,
+    commands: `Commandes : /${COMMAND}-agents (panneau Agents), /${COMMAND}-progress (afficher ou masquer les barres), /${COMMAND}-progress-demo, /${COMMAND}-progress-clear, /${COMMAND}-progress-sounds`,
     unknown: (f: string) => `Option inconnue « ${f} ».`,
     needs: (f: string, v: string) => `« ${f} » accepte ${v}.`,
     notChanged: (f: string, why: string) => `${f} inchangé : ${why}`,

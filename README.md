@@ -5,6 +5,7 @@ Personal Claude Code mods, in one plugin. Each feature can be switched on or off
 | Feature | Option | What it draws |
 | --- | --- | --- |
 | Plan progress | `planProgress` | Progress bars for multi-step tasks (stages, steps, subagent strips, sounds), above the prompt, on top |
+| Agents pane | `agentsPane` | A pane listing the session's subagents and what each one does, with the team's journal |
 | Usage meters | `usageMeters` | Context, session (5-hour) and weekly limits, always at the bottom: one column each, the share used and the reset time on one line, the bar under it |
 
 Other options:
@@ -15,6 +16,10 @@ Other options:
   - `off`: no reminders; Claude uses the bars when it finds them useful.
 - `sounds` (`soft`, `classic`, `off`; default `soft`): the sounds when a bar waits for a decision,
   fails or finishes. `soft` is still-mods' own (made by `tools/make-sounds.py`), `classic` plan-progress'.
+- `agentsPane` (`auto`, `manual`, `off`; default `auto`): `auto` opens the Agents pane when a subagent
+  starts, `manual` only with `/still-mods-agents`.
+- `agentsSessionsDir` (default `_generated-ai-doc/sessions`): the folder, from the project root, that
+  holds the team's session folders; the pane shows the newest one's `journal.md`.
 - `timeZone` (default `Europe/Paris`), the zone of the 5-hour reset time.
 - `language` (`auto`, `en`, `fr`; default `auto`): the labels' language. `auto` follows Claude Code's `language` setting, then the system locale.
 
@@ -44,6 +49,22 @@ it as it works. Up to 5 bars show at once; past that, finished ones go first.
 - The knob names the stage at work, or the step at work for a one-stage todo list, with its count.
 - The colour is the state: running, waiting for a decision, error, done (each with a sound, see `sounds`).
 
+## Agents pane
+
+`/still-mods-agents` opens or closes it (in `auto`, it opens by itself when a subagent starts).
+
+- **Agents**, from the engine's events in this session: each subagent's role (`subagentType`), state
+  (running, waiting for an approval, done, failed, stopped), time, the tool it runs now and on what
+  (a file, a command, a pattern), and how many tools it called. Running ones first, then the latest
+  finished.
+- **Session folder**: the newest folder under `agentsSessionsDir`, and which role files it holds
+  (`brief.md`, `contrat.md`, `test.md`, `revue-ui.md`).
+- **Journal**: the newest entries of its `journal.md`, read every 4 seconds, one per line as
+  `HH:MM · role · type · #tag text`; `bloque`, `decision` and `resultat` are coloured.
+
+Agents started in another session are not listed (the journal, read from disk, shows them). The
+messages between the main thread and a subagent are not shown, only its tool calls.
+
 ## Usage meters
 
 One column each for the context, the session (5-hour) limit and the weekly limit: the title and the
@@ -66,6 +87,7 @@ weekly limit and the usage credits the desktop panel shows are not available to 
 - `features/<feature>.tsx`: one feature, registering its own hooks.
 - `features/settings.ts`: the `/still-mods` command, always on.
 - `features/band.ts`: stacks the parts of the band above the prompt.
+- `features/agents.tsx`: the Agents pane.
 - `features/i18n.ts`: the labels in English and French.
 - `sounds/<theme>/`: the sound themes; `tools/make-sounds.py` synthesizes `sounds/soft/`.
 
@@ -109,6 +131,7 @@ claude plugin validate .                              # the marketplace
 ## Commands
 
 - `/still-mods`: show or change the options.
+- `/still-mods-agents`: open or close the Agents pane.
 - `/still-mods-progress`: show or hide the bars.
 - `/still-mods-progress-demo`: add a sample bar, one of 5 at random.
 - `/still-mods-progress-clear`: remove every bar.

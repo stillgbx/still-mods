@@ -11,8 +11,8 @@
     {
       "name": "still-mods",
       "source": "./",
-      "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters. Built on plan-progress (Kirill Serditov) and usage-meter (HolyGrail)",
-      "version": "0.5.0",
+      "description": "Personal mods for Claude Code: plan progress bars, usage meters and an Agents pane. Built on plan-progress (Kirill Serditov) and usage-meter (HolyGrail)",
+      "version": "0.6.0",
       "author": {
         "name": "stillgbx"
       },

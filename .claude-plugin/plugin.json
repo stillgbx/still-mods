@@ -1,7 +1,7 @@
 {
   "name": "still-mods",
-  "version": "0.5.0",
-  "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
+  "version": "0.6.0",
+  "description": "Personal mods for Claude Code: plan progress bars, usage meters and an Agents pane",
   "author": {
     "name": "stillgbx",
     "url": "https://github.com/stillgbx"
@@ -35,6 +35,23 @@
         "off"
       ],
       "default": "soft"
+    },
+    "agentsPane": {
+      "type": "string",
+      "title": "Agents pane",
+      "description": "The subagents of the session and the team journal: auto opens it when an agent starts, manual with /still-mods-agents, off",
+      "options": [
+        "auto",
+        "manual",
+        "off"
+      ],
+      "default": "auto"
+    },
+    "agentsSessionsDir": {
+      "type": "string",
+      "title": "Team session folders",
+      "description": "Folder of the team's session folders, from the project root; the newest one's journal.md is shown",
+      "default": "_generated-ai-doc/sessions"
     },
     "usageMeters": {
       "type": "boolean",
