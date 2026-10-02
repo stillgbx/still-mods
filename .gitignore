@@ -1,0 +1,20 @@
+# editors and agents
+.cursor/
+.claude/
+.vscode/
+.idea/
+
+# types the engine writes for the editor (/plugin-types)
+.claude-plugin/types/
+
+# dependencies and logs
+node_modules/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# written by /still-mods to reload the plugin
+.reload-stamp

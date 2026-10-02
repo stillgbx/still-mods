@@ -1,0 +1,51 @@
+{
+  "name": "still-mods",
+  "version": "0.4.0",
+  "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
+  "author": {
+    "name": "stillgbx"
+  },
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "planProgress": {
+      "type": "boolean",
+      "title": "Plan progress bars",
+      "description": "Progress bars for multi-step tasks, with the plan_progress tool and the /progress commands",
+      "default": true
+    },
+    "planEnforcement": {
+      "type": "string",
+      "title": "Plan bar enforcement",
+      "description": "strict: refuse changes and send the turn back until the bar is updated; soft: reminders only; off: bars only when Claude finds them useful",
+      "options": [
+        "strict",
+        "soft",
+        "off"
+      ],
+      "default": "soft"
+    },
+    "usageMeters": {
+      "type": "boolean",
+      "title": "Usage meters",
+      "description": "Context, 5-hour and weekly limit meters at the bottom of the band",
+      "default": true
+    },
+    "timeZone": {
+      "type": "string",
+      "title": "Reset time zone",
+      "description": "IANA time zone for the 5-hour reset time, such as Europe/Paris",
+      "default": "Europe/Paris"
+    },
+    "language": {
+      "type": "string",
+      "title": "Language",
+      "description": "Labels' language: auto follows Claude Code's language setting, then the system locale",
+      "options": [
+        "auto",
+        "en",
+        "fr"
+      ],
+      "default": "auto"
+    }
+  }
+}

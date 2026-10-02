@@ -1,6 +1,0 @@
-{
-  "name": "usage-progress",
-  "version": "0.1.0",
-  "description": "Context, 5-hour and weekly usage meters plus live plan progress bars above the prompt (combines usage-meter and plan-progress)",
-  "types": "./types/index.d.ts"
-}

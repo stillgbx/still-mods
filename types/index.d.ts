@@ -28,7 +28,7 @@ export type Plan = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'usage-progress': {
+    'still-mods': {
       plans: Plan[]
       isOpen: boolean
       // bumped every second while agents run, so elapsed times and folding redraw

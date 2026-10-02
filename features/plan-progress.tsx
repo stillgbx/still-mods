@@ -2,14 +2,16 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanStage, PlanState, PlanStep, StepStatus } from '../types'
+import { stack } from './band'
+import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
-const TOOL = 'mcp__usage-progress__plan_progress'
-const plans = atom({ plugin: 'usage-progress', key: 'plans' } as const, [])
-const MAX_BARS = 3
+const TOOL = 'mcp__still-mods__plan_progress'
+const plans = atom({ plugin: 'still-mods', key: 'plans' } as const, [])
+const MAX_BARS = 5
 // a space as wide as a digit, so '  0%' and '100%' take the same room
 const FIGURE_SPACE = String.fromCharCode(0x2007)
-const isOpen = atom({ plugin: 'usage-progress', key: 'isOpen' } as const, true)
-const tick = atom({ plugin: 'usage-progress', key: 'tick' } as const, 0)
+const isOpen = atom({ plugin: 'still-mods', key: 'isOpen' } as const, true)
+const tick = atom({ plugin: 'still-mods', key: 'tick' } as const, 0)
 const STRIP_H = 18
 const STRIP_GAP = 3
 const MAX_STRIPS = 4 // past this, the finished ones fold into one "+N more" strip
@@ -21,8 +23,22 @@ const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
 const TRACK_H = 22
 const NARROW = 360
 
-const RULES = `# Progress bars
-Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-7 stages with short steps, or kind "todo" for one flat list; titles of at most 4 words, in the user's language), then update it with short calls only: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
+// how hard the module holds the model to its bars, the planEnforcement option:
+// strict refuses a call and sends a turn back, soft only reminds, off leaves the bars to the model
+export type Enforcement = 'strict' | 'soft' | 'off'
+let enforcement: Enforcement = 'soft'
+// the labels' language: the language option, else read at session.start
+let language = 'auto'
+let locale: Locale = 'en'
+const L = () => strings(locale)
+
+const RULES_BODY = `Tasks needing more than ~3 edits or commands get a bar via ${TOOL}: create it once with the full breakdown (2-10 stages with short steps, or kind "todo" for one flat list; titles of at most 4 words, in the user's language), then update it with short calls only: {id, next:true} when the active step is finished, or {id, done:[...], active:"..."}, {id, failed:"...", note}. Send state "needs_input" with a note before asking the user to decide. Never describe the bars to the user.`
+const rules = () =>
+  enforcement === 'off'
+    ? `# Progress bars
+Optional: for long multi-step tasks you may show a bar via ${TOOL}. ${RULES_BODY.slice(RULES_BODY.indexOf('create it once'))}`
+    : `# Progress bars
+${RULES_BODY}`
 
 type Raw = Record<string, unknown>
 const str = (v: unknown, max = 120) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, max) : '')
@@ -148,21 +164,94 @@ function st(title: string, s: StepStatus): PlanStep {
   return { title, status: s, substeps: [] }
 }
 
-const DEMO = (now: number): Plan => ({
-  id: 'demo',
-  title: 'Orders module',
-  kind: 'plan',
-  state: 'running',
-  note: null,
-  startedAt: now - 260_000,
-  stages: [
-    { name: 'Analysis', steps: [st('Read modules', 'done'), st('Find dependencies', 'done'), st('List changes', 'done')] },
-    { name: 'DB migration', steps: [st('Table schema', 'done'), st('Create migration', 'done'), st('Move data', 'active'), st('Indexes', 'pending')] },
-    { name: 'API', steps: [st('Endpoints', 'pending'), st('Validation', 'pending'), st('Access rules', 'pending')] },
-    { name: 'Interface', steps: [st('List page', 'pending'), st('Order card', 'pending'), st('Filters', 'pending'), st('Empty states', 'pending')] },
-    { name: 'Verify', steps: [st('Tests', 'pending'), st('Build', 'pending')] },
-  ],
-})
+// sample bars for /still-mods-progress-demo, one picked at random each time and added to the others
+const tr = (en: string, fr: string) => (locale === 'fr' ? fr : en)
+
+const DEMOS: ((now: number) => Omit<Plan, 'id'>)[] = [
+  // several stages, mid-way
+  now => ({
+    title: tr('Orders module', 'Module commandes'),
+    kind: 'plan',
+    state: 'running',
+    note: null,
+    startedAt: now - 260_000,
+    stages: [
+      { name: tr('Analysis', 'Analyse'), steps: [st(tr('Read modules', 'Lire les modules'), 'done'), st(tr('Find dependencies', 'Dépendances'), 'done'), st(tr('List changes', 'Lister les changements'), 'done')] },
+      {
+        name: tr('DB migration', 'Migration BDD'),
+        steps: [st(tr('Table schema', 'Schéma des tables'), 'done'), st(tr('Create migration', 'Créer la migration'), 'done'), st(tr('Move data', 'Migrer les données'), 'active'), st(tr('Indexes', 'Index'), 'pending')],
+      },
+      { name: 'API', steps: [st('Endpoints', 'pending'), st('Validation', 'pending'), st(tr('Access rules', "Règles d'accès"), 'pending')] },
+      { name: tr('Interface', 'Interface'), steps: [st(tr('List page', 'Page liste'), 'pending'), st(tr('Order card', 'Fiche commande'), 'pending'), st(tr('Filters', 'Filtres'), 'pending')] },
+      { name: tr('Verify', 'Vérification'), steps: [st('Tests', 'pending'), st('Build', 'pending')] },
+    ],
+  }),
+  // a flat todo list, just started
+  now => ({
+    title: tr('Fix login bugs', 'Bugs de connexion'),
+    kind: 'todo',
+    state: 'running',
+    note: null,
+    startedAt: now - 45_000,
+    stages: [
+      {
+        name: tr('Tasks', 'Tâches'),
+        steps: [
+          st(tr('Reproduce the timeout', 'Reproduire le timeout'), 'done'),
+          st(tr('Refresh the token', 'Rafraîchir le jeton'), 'active'),
+          st(tr('Remember me', 'Se souvenir de moi'), 'pending'),
+          st(tr('Error messages', "Messages d'erreur"), 'pending'),
+          st(tr('Regression tests', 'Tests de non-régression'), 'pending'),
+        ],
+      },
+    ],
+  }),
+  // waiting for a decision
+  now => ({
+    title: tr('Payment provider', 'Prestataire de paiement'),
+    kind: 'plan',
+    state: 'needs_input',
+    note: tr('Stripe or Adyen?', 'Stripe ou Adyen ?'),
+    startedAt: now - 520_000,
+    stages: [
+      { name: tr('Compare', 'Comparer'), steps: [st(tr('Fees', 'Frais'), 'done'), st(tr('Countries', 'Pays'), 'done'), st(tr('Pick one', 'Choisir'), 'active')] },
+      { name: tr('Integrate', 'Intégrer'), steps: [st('SDK', 'pending'), st('Webhooks', 'pending')] },
+      { name: tr('Ship', 'Livrer'), steps: [st(tr('Sandbox tests', 'Tests sandbox'), 'pending'), st(tr('Go live', 'Mise en prod'), 'pending')] },
+    ],
+  }),
+  // stopped on a failure
+  now => ({
+    title: tr('Release 2.4', 'Version 2.4'),
+    kind: 'plan',
+    state: 'error',
+    note: tr('Build failed on Windows', 'Build en échec sous Windows'),
+    startedAt: now - 900_000,
+    stages: [
+      { name: tr('Prepare', 'Préparer'), steps: [st('Changelog', 'done'), st(tr('Bump version', 'Version'), 'done')] },
+      { name: 'Build', steps: [st('Linux', 'done'), st('macOS', 'done'), st('Windows', 'error')] },
+      { name: tr('Publish', 'Publier'), steps: [st(tr('Upload', 'Envoi'), 'pending'), st(tr('Announce', 'Annonce'), 'pending')] },
+    ],
+  }),
+  // finished
+  now => ({
+    title: tr('Docs refresh', 'Mise à jour de la doc'),
+    kind: 'todo',
+    state: 'done',
+    note: null,
+    startedAt: now - 1_800_000,
+    stages: [{ name: tr('Tasks', 'Tâches'), steps: [st('README', 'done'), st(tr('API reference', 'Référence API'), 'done'), st(tr('Examples', 'Exemples'), 'done')] }],
+  }),
+]
+
+// a template not on screen yet when one is left, under an id of its own so it adds a bar
+function demoPlan(now: number, shown: Plan[]): Plan {
+  const titles = new Set(shown.map(p => p.title))
+  const made = DEMOS.map(make => make(now))
+  const fresh = made.filter(p => !titles.has(p.title))
+  const pool = fresh.length > 0 ? fresh : made
+  const pick = pool[Math.floor(Math.random() * pool.length)] ?? made[0]!
+  return { ...pick, id: `demo-${now.toString(36)}` }
+}
 
 // ---------- drawing ----------
 
@@ -176,6 +265,12 @@ function where(p: Plan): Where {
   const stage = cur?.i ?? 0
 
   return { pos, total: steps.length, stage, step: pos >= steps.length ? (p.stages[stage]?.steps.length ?? 0) : (cur?.j ?? 0) + 1, stageSize: p.stages[stage]?.steps.length ?? 0 }
+}
+
+// the step at work: the active one, else the first not finished
+function currentStep(p: Plan): PlanStep | undefined {
+  const steps = p.stages.flatMap(s => s.steps)
+  return steps.find(st => st.status === 'active') ?? steps.find(st => !isFinished(st.status))
 }
 
 const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
@@ -272,7 +367,8 @@ function trackSvg(p: Plan, W: number): string {
       done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
     }`
   } else {
-    const name = done ? 'Done' : single ? (p.stages[0]?.name ?? 'Tasks') : (p.stages[w.stage]?.name ?? '')
+    // one stage (a todo list): the step at work names the knob; several: the stage at work
+    const name = done ? L().done : single ? (currentStep(p)?.title ?? p.stages[0]?.name ?? L().tasks) : (p.stages[w.stage]?.name ?? '')
     const agents = p.agents ?? []
     const base = p.id === AGENTS ? `${w.pos}/${w.total}` : done ? `${w.total}/${w.total}` : single ? `${number}/${w.total}` : `${w.step}/${w.stageSize}`
     const agentCount = agents.length > 0 && p.id !== AGENTS ? ` · ${agents.filter(a => a.state === 'done').length}/${agents.length} agents` : ''
@@ -395,7 +491,7 @@ function stripsSvg(v: { shown: AgentRun[]; hidden: AgentRun[] }, W: number, now:
     const doneCount = v.hidden.filter(a => a.state === 'done').length
     rows.push(
       `<rect x="0" y="${y}" width="${W}" height="${STRIP_H}" rx="${STRIP_H / 2}" fill="#808080" fill-opacity=".14"/>` +
-        `<text x="10" y="${y + 12.5}" class="sn st">+${plural(v.hidden.length, 'more agent')} · ${doneCount} done</text>`,
+        `<text x="10" y="${y + 12.5}" class="sn st">${esc(L().moreAgents(v.hidden.length))} · ${esc(L().nDone(doneCount))}</text>`,
     )
   }
   return `<style>.sn{font:400 11.5px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#F0EEFC}.st{fill-opacity:.65}
@@ -547,7 +643,22 @@ const WORK_BEFORE_PLAN = 3 // the 4th changing call without a plan is refused on
 const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update before a reminder
 
 
-export const register: Register = on => {
+export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string }) {
+  enforcement = options.enforcement ?? 'soft'
+  language = options.language ?? 'auto'
+  // a matcher, so other features may hook session.start too
+  on('session.start', { isInteractive: [true, false] }, async ($, e, next) => {
+    await startPlanProgress($)
+    return next(e)
+  })
+
+  // the bars sit above whatever the hooks beneath draw
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const bars = await planBars($, e)
+    const rest = await next(e)
+    return stack($.ui.resolve(e).Box, [bars, rest]) ?? rest
+  })
+
   // per-turn bookkeeping; module variables are fine here, a reload just starts a fresh count
   let workCalls = 0
   let sinceUpdate = 0
@@ -575,7 +686,7 @@ export const register: Register = on => {
     }
     const open = list.filter(p => p.state !== 'done' && p.id !== AGENTS)
     if (open.length === 0) return next(e)
-    const line = `usage-progress open bars: ${open
+    const line = `still-mods open bars: ${open
       .map(p => {
         const w = where(p)
         return `${p.id} (${p.stages[w.stage]?.name ?? ''} ${w.step}/${w.stageSize})`
@@ -602,20 +713,22 @@ export const register: Register = on => {
     if (!WORK_TOOLS.has(e.tool)) return next(e)
     isWaitingOnBackground = (e as unknown as Raw).run_in_background === true
     const hasLivePlan = isPlanTouched || (await read($, plans)).some(isOpenPlan)
-    if (!hasLivePlan && !hasRefused && workCalls >= WORK_BEFORE_PLAN) {
+    const asksForBar = enforcement !== 'off' && !hasLivePlan && !hasRefused && workCalls >= WORK_BEFORE_PLAN
+    if (asksForBar) {
       hasRefused = true
-
-      return { deny: `usage-progress: several changes ahead. Create a bar with ${TOOL} first, then retry.` }
+      if (enforcement === 'strict') return { deny: `still-mods: several changes ahead. Create a bar with ${TOOL} first, then retry.` }
     }
     const ran = await next(e)
     // a shell call that only read (ls, git status, grep) is not work
     if (ran.deny !== undefined || ran.isReadOnly) return ran
     workCalls += 1
     sinceUpdate += 1
-    if (hasLivePlan && sinceUpdate >= CALLS_BEFORE_NUDGE) {
+    // soft: the call ran, and the model is told once that a bar would fit
+    if (asksForBar) return { ...ran, context: [...(ran.context ?? []), `still-mods: several changes ahead, consider a bar with ${TOOL}.`] }
+    if (enforcement !== 'off' && hasLivePlan && sinceUpdate >= CALLS_BEFORE_NUDGE) {
       sinceUpdate = 0
 
-      return { ...ran, context: [...(ran.context ?? []), `usage-progress: bar is stale, send {id, next:true} or {id, done, active}.`] }
+      return { ...ran, context: [...(ran.context ?? []), `still-mods: bar is stale, send {id, next:true} or {id, done, active}.`] }
     }
 
     return ran
@@ -635,55 +748,20 @@ export const register: Register = on => {
 
       return result
     }
-    if (workCalls === 0 && !isPlanTouched) return result
+    // only strict sends the turn back; soft and off leave the open bar as it is
+    if (enforcement !== 'strict' || (workCalls === 0 && !isPlanTouched)) return result
 
     return {
       ...result,
-      block: `usage-progress: ${open.map(p => p.id).join(', ')} still open. Update each with ${TOOL}: {id, next:true}, or state "done", "needs_input" or "error" with a note.`,
+      block: `still-mods: ${open.map(p => p.id).join(', ')} still open. Update each with ${TOOL}: {id, next:true}, or state "done", "needs_input" or "error" with a note.`,
     }
   })
 
-  on('session.start', async ($, e, next) => {
-    await $.tool.register({
-      name: 'plan_progress',
-      description: 'Live progress bar above the prompt, one per id. Create with title + stages; update with short ops (next, done, active, failed) or state.',
-      inputSchema: {
-        type: 'object',
-        required: ['id'],
-        properties: {
-          id: { type: 'string', description: 'Bar id; reuse it for updates' },
-          title: { type: 'string' },
-          kind: { enum: ['plan', 'todo'] },
-          stages: {
-            type: 'array',
-            description: 'Full breakdown, only when creating or restructuring',
-            items: { type: 'object', required: ['name', 'steps'], properties: { name: { type: 'string' }, steps: { type: 'array', items: STEP_SCHEMA } } },
-          },
-          next: { type: 'boolean', description: 'Active step finished, start the next one' },
-          done: { type: 'array', items: { type: 'string' }, description: 'Step titles now finished' },
-          active: { type: 'string', description: 'Step title now in progress' },
-          failed: { type: 'string', description: 'Step title that failed' },
-          state: { enum: ['running', 'needs_input', 'error', 'done'] },
-          note: { type: 'string', description: 'One line for needs_input or error' },
-        },
-      },
-    })
-    $.clock.every(1000, async () => {
-      if (agentHome.size > 0 || (await $.clock.now()) < foldUntil) await update($, tick, n => n + 1)
-    })
-    await $.command.register({ name: 'progress', description: 'Show or hide the progress bars' })
-    await $.command.register({ name: 'progress-demo', description: 'Show a sample plan in the progress bars' })
-    await $.command.register({ name: 'progress-sounds', description: 'Play the decision, error and done sounds' })
-    await $.command.register({ name: 'progress-clear', description: 'Remove all progress bars' })
-    await startUsage($)
-
-    return next(e)
-  })
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
 
-    return { sections: [...result.sections, { id: 'usage-progress:rules', text: RULES, scope: 'session' as const }] }
+    return { sections: [...result.sections, { id: 'still-mods:rules', text: rules(), scope: 'session' as const }] }
   })
 
   on('tool.call', { tool: TOOL }, async ($, e) => {
@@ -725,28 +803,28 @@ export const register: Register = on => {
     return ran
   })
 
-  on('command.run', { command: 'progress' }, async $ => {
-    if ((await read($, plans)).length === 0) return { text: 'No plan yet. /progress-demo shows a sample.' }
+  on('command.run', { command: 'still-mods-progress' }, async $ => {
+    if ((await read($, plans)).length === 0) return { text: 'No plan yet. /still-mods-progress-demo shows a sample.' }
     const open = await read($, isOpen)
     await update($, isOpen, () => !open)
 
     return { text: open ? 'Progress bars hidden.' : 'Progress bars shown.' }
   })
 
-  on('command.run', { command: 'progress-demo' }, async $ => {
-    await putPlan($, DEMO(await $.clock.now()))
+  on('command.run', { command: 'still-mods-progress-demo' }, async $ => {
+    await putPlan($, demoPlan(await $.clock.now(), await read($, plans)))
     await update($, isOpen, () => true)
 
-    return { text: 'Sample plan shown above the prompt.' }
+    return { text: locale === 'fr' ? 'Barre d’exemple ajoutée au-dessus du prompt.' : 'Sample bar added above the prompt.' }
   })
 
-  on('command.run', { command: 'progress-clear' }, async $ => {
+  on('command.run', { command: 'still-mods-progress-clear' }, async $ => {
     await update($, plans, () => [])
 
     return { text: 'Progress bars removed.' }
   })
 
-  on('command.run', { command: 'progress-sounds' }, async $ => {
+  on('command.run', { command: 'still-mods-progress-sounds' }, async $ => {
     play($, 'decision')
     $.clock.after(900, () => play($, 'error'))
     $.clock.after(1800, () => play($, 'done'))
@@ -763,38 +841,17 @@ export const register: Register = on => {
     const below = await next(e)
     const press = () =>
       count === 0
-        ? $.ui.toast('usage-progress is on. A bar appears when Claude starts a task with several steps.')
+        ? $.ui.toast(L().pluginOn)
         : update($, isOpen, () => !open)
 
     return (
       <Box flexDirection="row" alignItems="center" gap={1}>
-        <Button key="progress-toggle" dimColor={count === 0 || !open} label={count > 1 ? `Progress ${count}` : 'Progress'} onPress={press} />
+        <Button key="progress-toggle" dimColor={count === 0 || !open} label={count > 1 ? `${L().progress} ${count}` : L().progress} onPress={press} />
         {below}
       </Box>
     )
   })
 
-  registerUsage(on)
-
-  // the plan bars on top, whatever the mods beneath draw, and the usage meters always last, next to the prompt
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    const meters = await usageLine($, e)
-    const bars = await planBars($, e)
-    const rest = await next(e)
-    const parts = [bars, rest, meters].filter(Boolean)
-    if (parts.length === 0) return rest
-    if (parts.length === 1) return parts[0]
-    const { Box } = $.ui.resolve(e)
-    return (
-      <Box flexDirection="column" gap={1}>
-        {parts.map((part, i) => (
-          <Box key={`part-${i}`} flexDirection="column">
-            {part}
-          </Box>
-        ))}
-      </Box>
-    )
-  })
 
 
   on('agent.spawn', async ($, e, next) => {
@@ -836,7 +893,7 @@ export const register: Register = on => {
       $.clock.after(600, async () => {
         if (toolUses.get(useId) !== agentId) return
         waiting.add(agentId)
-        await editAgent($, agentId, a => ({ ...a, state: 'waiting', tool: 'Needs approval' }))
+        await editAgent($, agentId, a => ({ ...a, state: 'waiting', tool: L().needsApproval }))
       })
     }
 
@@ -848,7 +905,7 @@ export const register: Register = on => {
     if (agentId && agentHome.has(agentId)) {
       const now = await $.clock.now()
       const isFailed = e.reason !== 'answer'
-      const tool = e.reason === 'aborted' ? 'Stopped' : isFailed ? 'Failed' : 'Done'
+      const tool = e.reason === 'aborted' ? L().stopped : isFailed ? L().failed : L().done
       await editAgent($, agentId, a => ({ ...a, state: isFailed ? 'error' : 'done', tool, endedAt: now }))
       // the mod's own bar sounds through its state; a strip on a task bar sounds here
       if (isFailed && agentHome.get(agentId) !== AGENTS) play($, 'error')
@@ -867,307 +924,45 @@ export const register: Register = on => {
   })
 }
 
-// ---------- usage meters (adapted from HolyGrail's usage-meter) ----------
-// context, 5-hour and weekly limit usage, shown on top of the plan bars
-
-let context: any = null
-let rateLimits: any[] = []
-// when rateLimits was last measured, in $.clock.now() milliseconds
-let measuredAt = 0
-let ticker: { cancel(): void } | null = null
-// this session's own key in the store
-let ownKey: string | null = null
-
-// rate limits are per account, so sessions share readings through $.store and each shows the newest;
-// each session writes only its own key, so no write can overwrite another session's reading
-const KEY_PREFIX = 'reading:'
-const HOUR_MS = 3_600_000
-// readings older than the longest window say nothing current
-const STALE_MS = 8 * 24 * HOUR_MS
-// the session.end reasons after which the meters stop; /clear, /resume and logout keep them running
-const FINAL_REASONS = ['prompt_input_exit', 'other']
-const TICK_MS = 60_000
-// reset times are shown in this zone
-const TIME_ZONE = 'Europe/Paris'
-
-const WINDOWS: Record<string, { label: string; ms?: number; showsClock?: boolean }> = {
-  five_hour: { label: '5h', ms: 5 * HOUR_MS, showsClock: true },
-  seven_day: { label: '7d', ms: 7 * 24 * HOUR_MS },
-  spend_limit: { label: '$' },
-}
-// shown even before any reading, so the band keeps its shape from the first frame
-const ALWAYS_SHOWN = ['five_hour', 'seven_day']
-
-// pace thresholds: margin is the elapsed share of the window minus the used share
-const GREEN_MIN_MARGIN = 10
-const RED_BELOW_MARGIN = -15
-const GREEN_MAX_USED = 10
-const RED_MIN_USED = 90
-
-// bar length bounds, in terminal cells; the bars stretch between them to fill the band
-const MIN_BAR_CELLS = 6
-const MAX_BAR_CELLS = 40
-// the desktop draws about this many CSS pixels per column
-const PX_PER_COLUMN = 8
-const METER_GAP = 3
-const BAND_RESERVED_COLUMNS = 2
-const SVG_BAR_HEIGHT = 10
-const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff' }
-const MARKER_COLOR = 'cyan'
-
-type Meter = { label: string; used: number | undefined; elapsed: number | null; resetsAt: number | null; showsClock?: boolean; value?: string }
-
-// called from the module's session.start, which fires again on a reload: the store stays, these variables start over
-async function startUsage($: EngineInterface) {
-  ticker?.cancel()
-  rateLimits = []
-  measuredAt = 0
-  ownKey = KEY_PREFIX + (await $.session.id())
-  const usage: any = await $.session.usage()
-  context = usage.context
-  if (usage.rateLimits.length > 0) await publishSnapshot($, usage.rateLimits)
-  await refresh($)
-  ticker = $.clock.every(TICK_MS, async () => {
-    await refresh($)
-    $.ui.invalidate('ui.render')
+// what the plan bars need at each session.start
+export async function startPlanProgress($: EngineInterface) {
+  const settings = await $.settings.read()
+  locale = resolveLocale(language, settings.language, systemLocale())
+  await $.tool.register({
+    name: 'plan_progress',
+    description: 'Live progress bar above the prompt, one per id. Create with title + stages; update with short ops (next, done, active, failed) or state.',
+    inputSchema: {
+      type: 'object',
+      required: ['id'],
+      properties: {
+        id: { type: 'string', description: 'Bar id; reuse it for updates' },
+        title: { type: 'string' },
+        kind: { enum: ['plan', 'todo'] },
+        stages: {
+          type: 'array',
+          description: 'Full breakdown, only when creating or restructuring',
+          items: { type: 'object', required: ['name', 'steps'], properties: { name: { type: 'string' }, steps: { type: 'array', items: STEP_SCHEMA } } },
+        },
+        next: { type: 'boolean', description: 'Active step finished, start the next one' },
+        done: { type: 'array', items: { type: 'string' }, description: 'Step titles now finished' },
+        active: { type: 'string', description: 'Step title now in progress' },
+        failed: { type: 'string', description: 'Step title that failed' },
+        state: { enum: ['running', 'needs_input', 'error', 'done'] },
+        note: { type: 'string', description: 'One line for needs_input or error' },
+      },
+    },
   })
-  $.ui.invalidate('ui.render')
-}
-
-function registerUsage(on: Parameters<Register>[0]) {
-  on('session.end', async ($, e, next) => {
-    if (!FINAL_REASONS.includes(e.reason) || !ownKey) return next(e)
-    ticker?.cancel()
-    await releaseKey($)
-    return next(e)
+  $.clock.every(1000, async () => {
+    if (agentHome.size > 0 || (await $.clock.now()) < foldUntil) await update($, tick, n => n + 1)
   })
-
-  // /clear, /resume, /branch and compaction change the context; all but compaction switch session id
-  on('classic.SessionStart', { source: ['clear', 'resume', 'fork', 'compact'] }, async ($, e, next) => {
-    const key = KEY_PREFIX + (await $.session.id())
-    if (ownKey && key !== ownKey) {
-      await releaseKey($)
-      ownKey = key
-    }
-    context = ((await $.session.usage()) as any).context
-    $.ui.invalidate('ui.render')
-    return next(e)
-  })
-
-  on('session.measure', async ($, e, next) => {
-    context = e.context
-    if (e.changed.includes('rateLimits')) await remember($, e.rateLimits as any[])
-    $.ui.invalidate('ui.render')
-    return next(e)
-  })
-}
-
-async function usageLine($: EngineInterface, e: any): Promise<any> {
-  const elements: any = $.ui.resolve(e)
-  const now = await $.clock.now()
-  const meters: Meter[] = [{ label: 'ctx', used: context?.percent, elapsed: null, resetsAt: null }]
-  for (const limit of rateLimits) meters.push(readLimit(limit, now))
-  // the windows arrive with the first API response; until then they show as unknown
-  for (const kind of ALWAYS_SHOWN) {
-    if (!rateLimits.some(l => l.kind === kind)) meters.push({ label: WINDOWS[kind].label, used: undefined, elapsed: null, resetsAt: null })
-  }
-  for (const m of meters) m.value = valueText(m, now)
-  const cells = barCells(meters, e.props.bodyColumns ?? 0)
-  const gauge = 'Svg' in elements ? 'svg' : cells >= MIN_BAR_CELLS ? 'text' : 'none'
-  // every bar the same length, the meters spread from edge to edge
-  return elements.Box({
-    key: 'usage-meters',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    columnGap: METER_GAP,
-    children: meters.map(m => meter(elements, gauge, Math.max(cells, MIN_BAR_CELLS), m)),
-  })
-}
-
-async function remember($: EngineInterface, limits: any[]) {
-  // take the time first, so a refresh meanwhile cannot pair old limits with it
-  const now = await $.clock.now()
-  rateLimits = limits
-  measuredAt = now
-  if (ownKey) await $.store.set(ownKey, { at: now, limits })
-}
-
-// takes the newest reading any session saved, unless this session's own is newer still
-async function refresh($: EngineInterface) {
-  const { entries, newest } = await scan($)
-  if (newest && newest.reading.at >= measuredAt) {
-    rateLimits = newest.reading.limits
-    measuredAt = newest.reading.at
-  } else if (!newest && measuredAt < (await $.clock.now()) - STALE_MS) {
-    rateLimits = []
-    measuredAt = 0
-  }
-  await prune($, entries, newest?.key)
-}
-
-// keeps this session's reading marked ended if it is the newest, removes it otherwise
-async function releaseKey($: EngineInterface) {
-  if (!ownKey) return
-  const { entries, newest } = await scan($)
-  if (newest?.key === ownKey) await $.store.set(ownKey, { ...newest.reading, ended: true })
-  else await $.store.delete(ownKey)
-  await prune($, entries, newest?.key)
-}
-
-async function prune($: EngineInterface, entries: { key: string; reading: any }[], newestKey: string | undefined) {
-  const cutoff = (await $.clock.now()) - STALE_MS
-  for (const { key, reading } of entries) {
-    if (key === ownKey || key === newestKey) continue
-    if (!isReading(reading) || reading.ended === true || reading.at < cutoff) await $.store.delete(key)
-  }
-}
-
-// a shared reading always wins over the startup snapshot of usage(), which may be older
-async function publishSnapshot($: EngineInterface, snapshot: any[]) {
-  const { newest } = await scan($)
-  if (newest) {
-    rateLimits = newest.reading.limits
-    measuredAt = newest.reading.at
-    return
-  }
-  await remember($, snapshot)
-}
-
-async function scan($: EngineInterface) {
-  const entries: { key: string; reading: any }[] = []
-  let newest: { key: string; reading: any } | null = null
-  const cutoff = (await $.clock.now()) - STALE_MS
-  for (const key of await $.store.keys()) {
-    if (!key.startsWith(KEY_PREFIX)) continue
-    const reading: any = await $.store.get(key)
-    entries.push({ key, reading })
-    if (!isReading(reading) || reading.at < cutoff) continue
-    if (!newest || reading.at > newest.reading.at || (reading.at === newest.reading.at && key > newest.key)) newest = { key, reading }
-  }
-  return { entries, newest }
-}
-
-function isReading(value: any) {
-  return value != null && typeof value.at === 'number' && Array.isArray(value.limits)
-}
-
-function readLimit(limit: any, now: number): Meter {
-  const window = WINDOWS[limit.kind]
-  const label = window?.label ?? limit.kind
-  const resetsAtMs = limit.resetsAt == null ? null : Date.parse(limit.resetsAt)
-  // a window that has reset since the last reading starts again from zero
-  if (resetsAtMs != null && resetsAtMs <= now) return { label, used: 0, elapsed: window?.ms ? 0 : null, resetsAt: null }
-  const elapsed = window?.ms && resetsAtMs != null ? clamp(100 - ((resetsAtMs - now) / window.ms) * 100) : null
-  return { label, used: limit.percentUsed, elapsed, resetsAt: resetsAtMs, showsClock: window?.showsClock === true }
-}
-
-function statusOf(used: number, elapsed: number | null) {
-  if (used >= RED_MIN_USED) return 'error'
-  if (elapsed == null) return used >= 80 ? 'error' : used >= 50 ? 'warning' : 'success'
-  const margin = elapsed - used
-  if (margin < RED_BELOW_MARGIN) return 'error'
-  if (margin < GREEN_MIN_MARGIN && used >= GREEN_MAX_USED) return 'warning'
-  return 'success'
-}
-
-function valueText({ used, resetsAt, showsClock }: Meter, now: number) {
-  let value = typeof used === 'number' ? Math.round(used) + '%' : '—'
-  if (resetsAt != null) value += ' ' + untilReset(resetsAt - now)
-  if (resetsAt != null && showsClock) value += ' (' + localClock(resetsAt) + ')'
-  return value
-}
-
-// the bar length that shares the band's width evenly between the meters, each sized for the widest label and value
-function barCells(meters: Meter[], columns: number) {
-  const label = Math.max(...meters.map(m => [...m.label].length))
-  const value = Math.max(...meters.map(m => [...(m.value ?? '')].length))
-  const slot = Math.floor((columns - BAND_RESERVED_COLUMNS - METER_GAP * (meters.length - 1)) / meters.length)
-  return Math.min(MAX_BAR_CELLS, slot - label - value - 2)
-}
-
-function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { label, used, elapsed, value }: Meter) {
-  const known = typeof used === 'number'
-  const status = known ? statusOf(used, elapsed) : null
-  const style = known ? { color: status } : { dimColor: true }
-  const children: any[] = [Text({ children: [label] })]
-  if (gauge === 'svg') {
-    children.push(
-      Svg({
-        source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, status),
-        alt: label + ' ' + value + (elapsed == null ? '' : ', ' + Math.round(elapsed) + '% of the window gone'),
-        width: cells * PX_PER_COLUMN,
-        height: SVG_BAR_HEIGHT,
-      }),
-    )
-  } else if (gauge === 'text') {
-    children.push(textBar(Text, cells, known ? used : 0, elapsed, status))
-  }
-  children.push(Text({ ...style, children: [value] }))
-  return Box({ key: 'meter-' + label, flexDirection: 'row', columnGap: 1, alignItems: 'center', children })
-}
-
-// used cells in the status color, the rest dim, and the time marker
-function textBar(Text: any, cells: number, used: number, elapsed: number | null, status: string | null) {
-  const filled = Math.round((clamp(used) / 100) * cells)
-  const marker = elapsed == null ? -1 : Math.min(cells - 1, Math.floor((elapsed / 100) * cells))
-  const markerStyle = { color: MARKER_COLOR, bold: true }
-  const usedStyle = status ? { color: status } : { dimColor: true }
-  const restStyle = { dimColor: true }
-  const runs: { text: string; style: object }[] = []
-  for (let i = 0; i < cells; i++) {
-    const cell = i === marker ? { char: '┃', style: markerStyle } : i < filled ? { char: '█', style: usedStyle } : { char: '░', style: restStyle }
-    const last = runs.at(-1)
-    if (last && last.style === cell.style) last.text += cell.char
-    else runs.push({ text: cell.char, style: cell.style })
-  }
-  return Text({ children: runs.map(run => Text({ ...run.style, children: [run.text] })) })
-}
-
-function svgBar(width: number, used: number, elapsed: number | null, status: string | null) {
-  const height = SVG_BAR_HEIGHT
-  const r = height / 2
-  const fill = Math.round((clamp(used) / 100) * width)
-  const parts = [
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
-    `<clipPath id="c"><rect width="${width}" height="${height}" rx="${r}"/></clipPath>`,
-    `<g clip-path="url(#c)">`,
-    `<rect width="${width}" height="${height}" fill="${SVG_COLORS.track}"/>`,
-  ]
-  if (fill > 0) parts.push(`<rect width="${fill}" height="${height}" fill="${SVG_COLORS[status ?? 'success']}"/>`)
-  parts.push('</g>')
-  if (elapsed != null) {
-    const x = Math.min(width - 2, Math.max(0, Math.round((elapsed / 100) * width) - 1))
-    parts.push(`<rect x="${x}" width="2" height="${height}" fill="${SVG_COLORS.marker}"/>`)
-  }
-  parts.push('</svg>')
-  return parts.join('')
-}
-
-function clamp(percent: number) {
-  return Math.min(Math.max(percent, 0), 100)
-}
-
-// HH:MM, 24-hour, in TIME_ZONE; the environment's own zone if Intl cannot name it
-function localClock(ms: number) {
-  try {
-    return new Intl.DateTimeFormat('fr-FR', { timeZone: TIME_ZONE, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(ms))
-  } catch {
-    const d = new Date(ms)
-    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
-  }
-}
-
-function untilReset(ms: number) {
-  const minutes = Math.max(0, Math.ceil(ms / 60_000))
-  const days = Math.floor(minutes / 1440)
-  const hours = Math.floor((minutes % 1440) / 60)
-  if (days > 0) return days + 'd' + hours + 'h'
-  if (hours > 0) return hours + 'h' + (minutes % 60) + 'm'
-  return (minutes % 60) + 'm'
+  await $.command.register({ name: 'still-mods-progress', description: 'Show or hide the progress bars' })
+  await $.command.register({ name: 'still-mods-progress-demo', description: 'Show a sample plan in the progress bars' })
+  await $.command.register({ name: 'still-mods-progress-sounds', description: 'Play the decision, error and done sounds' })
+  await $.command.register({ name: 'still-mods-progress-clear', description: 'Remove all progress bars' })
 }
 
 // the plan bars, or null when there are none to show
-async function planBars($: EngineInterface, e: any): Promise<any> {
+export async function planBars($: EngineInterface, e: any): Promise<any> {
   const list = await read($, plans)
   if (list.length === 0 || e.props.hasSurvey || !(await read($, isOpen))) return null
   const t = $.ui.resolve(e)
@@ -1197,7 +992,7 @@ async function planBars($: EngineInterface, e: any): Promise<any> {
         const w = where(p)
         const pct = p.state === 'done' ? 100 : Math.round((Math.min(w.pos, w.total) / Math.max(1, w.total)) * 100)
         const color = STATE_COLOR[p.state]
-        const stageName = p.stages[w.stage]?.name ?? ''
+        const stageName = (p.stages.length === 1 ? currentStep(p)?.title : undefined) ?? p.stages[w.stage]?.name ?? ''
         const alt =
           p.state === 'done'
             ? `${p.title}: done, ${plural(w.total, 'step')}`
