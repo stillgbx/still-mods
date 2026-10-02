@@ -1,6 +1,6 @@
 {
   "name": "still-mods",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
   "author": {
     "name": "stillgbx",
@@ -35,6 +35,12 @@
         "off"
       ],
       "default": "soft"
+    },
+    "gitStatus": {
+      "type": "boolean",
+      "title": "Git status line",
+      "description": "The branch, the changed and new files, and ahead/behind its upstream, on the status line under the prompt",
+      "default": true
     },
     "usageMeters": {
       "type": "boolean",

@@ -32,6 +32,7 @@ const FIELDS: Field[] = [
     fallback: 'soft',
     label: { en: 'Sounds for decision, error, done', fr: 'Sons de décision, erreur, fin' },
   },
+  { name: 'gitStatus', kind: 'boolean', fallback: true, label: { en: 'Git status line (branch, changes, ahead/behind)', fr: 'Ligne d’état git (branche, modifs, avance/retard)' } },
   { name: 'usageMeters', kind: 'boolean', fallback: true, label: { en: 'Context and limit meters', fr: 'Compteurs de contexte et de limites' } },
   {
     name: 'palette',
