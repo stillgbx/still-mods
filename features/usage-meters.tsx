@@ -128,13 +128,17 @@ async function usageMeters($: EngineInterface, e: any): Promise<any> {
     if (!rateLimits.some(l => l.kind === kind)) meters.push({ key: kind, label: titleOf(kind), used: undefined, elapsed: null, detail: L.waiting })
   }
   const columns = e.props.bodyColumns ?? 0
-  const cells = Math.max(MIN_BAR_CELLS, Math.floor((columns - BAND_RESERVED_COLUMNS - METER_GAP * (meters.length - 1)) / meters.length))
+  const room = columns - BAND_RESERVED_COLUMNS
+  // side by side when every column gets its minimum, else one under the other (a phone)
+  const isRow = room - METER_GAP * (meters.length - 1) >= MIN_BAR_CELLS * meters.length
+  const cells = isRow ? Math.floor((room - METER_GAP * (meters.length - 1)) / meters.length) : Math.max(MIN_BAR_CELLS, room)
   const gauge = 'Svg' in elements ? 'svg' : 'text'
   // equal columns from edge to edge, each two lines: the figures, then the bar
   return elements.Box({
     key: 'usage-meters',
-    flexDirection: 'row',
+    flexDirection: isRow ? 'row' : 'column',
     columnGap: METER_GAP,
+    rowGap: 1,
     children: meters.map(m => meter(elements, gauge, cells, m)),
   })
 }

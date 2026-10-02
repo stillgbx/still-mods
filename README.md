@@ -48,6 +48,8 @@ One column each for the context, the session (5-hour) limit and the weekly limit
 share used, the reset time dimmed at the right (`↻ 32 min · 15:00`), and the bar under them. The
 context shows its tokens instead (`210k / 1M`).
 
+On a narrow screen (a phone) the meters stack one under the other.
+
 The blue line is the time gone in the window. A fill short of it means the limit lasts until the
 reset; a fill past it means usage runs ahead of time. The colour says the same: green at least 10
 points behind the line (or under 10 % used), orange close to it or a little past, red more than 15
@@ -72,7 +74,23 @@ which takes every session.
 Adding a feature: a file in `features/`, a `userConfig` field in `.claude-plugin/plugin.json`, a line
 in `hooks/register.tsx`.
 
-## Loading
+## Installing
+
+The repository is a marketplace holding this one plugin (`.claude-plugin/marketplace.json`):
+
+```
+/plugin marketplace add stillgbx/still-mods
+/plugin install still-mods@still-mods
+```
+
+The bars and meters draw on every surface: terminal, desktop, VS Code and the Claude mobile app
+(when it follows a session, the mod runs where the session runs). Mobile draws no input fields, which
+the mod does not use.
+
+## Loading for development
+
+Do not install it from the marketplace on the machine that loads the folder below, or it loads twice.
+
 
 `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` points to this folder.
 `CLAUDE_CODE_PLUGIN_DIR_WATCH=1` there too makes the desktop app watch it: saving a file reloads the
@@ -81,7 +99,8 @@ mod (without it, only a terminal session watches, and the desktop loads the mod 
 Check it with the engine's own CLI (the `claude` on PATH may be older):
 
 ```
-claude plugin validate .
+claude plugin validate .claude-plugin/plugin.json   # the plugin and its hooks
+claude plugin validate .                              # the marketplace
 ```
 
 ## Commands

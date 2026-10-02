@@ -1,0 +1,23 @@
+{
+  "name": "still-mods",
+  "owner": {
+    "name": "stillgbx",
+    "url": "https://github.com/stillgbx"
+  },
+  "metadata": {
+    "description": "Personal Claude Code mods by stillgbx"
+  },
+  "plugins": [
+    {
+      "name": "still-mods",
+      "source": "./",
+      "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
+      "version": "0.4.0",
+      "author": {
+        "name": "stillgbx"
+      },
+      "homepage": "https://github.com/stillgbx/still-mods",
+      "license": "MIT"
+    }
+  ]
+}
