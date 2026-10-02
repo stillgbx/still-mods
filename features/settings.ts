@@ -13,7 +13,7 @@ const PLUGIN = 'still-mods'
 // written after a change so the watched folder reloads the plugin; ignored by git
 const RELOAD_STAMP = '.reload-stamp'
 
-type Field = { name: string; kind: 'boolean' | 'choice' | 'text'; choices?: string[]; fallback: string | boolean; label: Record<Locale, string> }
+type Field = { name: string; kind: 'boolean' | 'choice' | 'text' | 'number'; choices?: string[]; fallback: string | boolean | number; label: Record<Locale, string> }
 
 // the manifest's userConfig, in the order the list shows it
 const FIELDS: Field[] = [
@@ -32,6 +32,8 @@ const FIELDS: Field[] = [
     fallback: 'soft',
     label: { en: 'Sounds for decision, error, done', fr: 'Sons de décision, erreur, fin' },
   },
+  { name: 'turnNotify', kind: 'boolean', fallback: true, label: { en: 'Sound and toast when a long turn ends', fr: 'Son et notification à la fin d’un long tour' } },
+  { name: 'turnNotifySeconds', kind: 'number', fallback: 60, label: { en: 'Seconds a turn must last to notify', fr: 'Durée minimale du tour pour notifier (s)' } },
   { name: 'gitStatus', kind: 'boolean', fallback: true, label: { en: 'Git status line (branch, changes, ahead/behind)', fr: 'Ligne d’état git (branche, modifs, avance/retard)' } },
   { name: 'usageMeters', kind: 'boolean', fallback: true, label: { en: 'Context and limit meters', fr: 'Compteurs de contexte et de limites' } },
   {
@@ -111,6 +113,7 @@ async function ownRows($: EngineInterface) {
 function accepted(field: Field) {
   if (field.kind === 'boolean') return 'on | off'
   if (field.kind === 'choice') return (field.choices ?? []).join(' | ')
+  if (field.kind === 'number') return locale === 'fr' ? 'un nombre' : 'a number'
   return TEXT[locale].anyText
 }
 
@@ -149,7 +152,7 @@ async function change($: EngineInterface, name: string, raw: string) {
 
 // writes pluginConfigs.<plugin>.options.<name> in the user settings, keeping every other key, then
 // touches the reload stamp so the watched plugin folder loads again with the new options
-async function saveOption($: EngineInterface, name: string, value: string | boolean) {
+async function saveOption($: EngineInterface, name: string, value: string | boolean | number) {
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
   if (!home) throw new Error('no home directory')
   const path = home.replace(/\\/g, '/') + '/.claude/settings.json'
@@ -163,8 +166,12 @@ async function saveOption($: EngineInterface, name: string, value: string | bool
   return path
 }
 
-function parseValue(field: Field, raw: string): string | boolean | undefined {
+function parseValue(field: Field, raw: string): string | boolean | number | undefined {
   const word = raw.trim()
+  if (field.kind === 'number') {
+    const n = Number(word.replace(',', '.'))
+    return word && Number.isFinite(n) && n >= 0 ? n : undefined
+  }
   if (field.kind === 'boolean') {
     const w = word.toLowerCase()
     if (['on', 'true', 'yes', 'oui', '1'].includes(w)) return true

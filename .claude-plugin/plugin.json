@@ -1,6 +1,6 @@
 {
   "name": "still-mods",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
   "author": {
     "name": "stillgbx",
@@ -35,6 +35,18 @@
         "off"
       ],
       "default": "soft"
+    },
+    "turnNotify": {
+      "type": "boolean",
+      "title": "End-of-turn notice",
+      "description": "A sound and a toast with the time and cost when a turn of the main thread ran longer than turnNotifySeconds; the decision sound when a call waits on your approval",
+      "default": true
+    },
+    "turnNotifySeconds": {
+      "type": "number",
+      "title": "End-of-turn threshold (s)",
+      "description": "How long a turn must run before its end is notified",
+      "default": 60
     },
     "gitStatus": {
       "type": "boolean",

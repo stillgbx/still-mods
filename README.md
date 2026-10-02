@@ -5,6 +5,7 @@ Personal Claude Code mods, in one plugin. Each feature can be switched on or off
 | Feature | Option | What it draws |
 | --- | --- | --- |
 | Plan progress | `planProgress` | Progress bars for multi-step tasks (stages, steps, subagent strips, sounds), above the prompt, on top |
+| End-of-turn notice | `turnNotify` | When a turn ran longer than `turnNotifySeconds` (60 by default): the done sound and a toast, `Claude a terminé en 4 min 12 s · 0,82 $`; the decision sound when a call waits on your approval |
 | Git status | `gitStatus` | The status line under the prompt: branch, changed and new files, ahead/behind its upstream (`⎇ main · 3 modifiés · 1 nouveau · ↑1`) |
 | Usage meters | `usageMeters` | Context, session (5-hour) and weekly limits, always at the bottom: one column each, the share used and the reset time on one line, the bar under it |
 
@@ -85,6 +86,8 @@ weekly limit and the usage credits the desktop panel shows are not available to 
 - `features/band.ts`: stacks the parts of the band above the prompt.
 - `features/git-status.ts`: the git status line, from `git status --porcelain=v1 -b` in the session's
   folder, at start, after each call that may change the tree, and every 15 seconds.
+- `features/turn-notify.ts`: the end-of-turn notice. A mod cannot tell whether the app is in front,
+  so the threshold is what keeps short answers silent.
 - `features/i18n.ts`: the labels in English and French.
 - `features/palettes.ts`: the colour palettes, each value taken from the theme's own repository.
 - `sounds/<theme>/`: the sound themes; `tools/make-sounds.py` synthesizes `sounds/soft/`.
