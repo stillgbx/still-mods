@@ -31,6 +31,9 @@ export type Enforcement = 'strict' | 'soft' | 'off'
 let enforcement: Enforcement = 'soft'
 // the labels' language: the language option, else read at session.start
 let language = 'auto'
+// the sound theme, the sounds option: a folder of sounds/, or off
+export type SoundTheme = 'soft' | 'classic' | 'off'
+let soundTheme: SoundTheme = 'soft'
 let locale: Locale = 'en'
 const L = () => strings(locale)
 
@@ -511,8 +514,9 @@ function plural(n: number, word: string) {
 
 // the engine's player first (afplay on macOS); PowerShell where it cannot play
 function play($: EngineInterface, name: 'decision' | 'error' | 'done') {
-  const file = `${$.plugin.root}/sounds/${name}.wav`.replace(/\//g, '\\')
-  void $.audio.play({ asset: `sounds/${name}.wav` }).catch(() =>
+  if (soundTheme === 'off') return
+  const file = `${$.plugin.root}/sounds/${soundTheme}/${name}.wav`.replace(/\//g, '\\')
+  void $.audio.play({ asset: `sounds/${soundTheme}/${name}.wav` }).catch(() =>
     $.process
       .run(['powershell', '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', `(New-Object Media.SoundPlayer '${file}').PlaySync()`], { timeoutMs: 5000 })
       .catch(() => undefined),
@@ -645,8 +649,9 @@ const WORK_BEFORE_PLAN = 3 // the 4th changing call without a plan is refused on
 const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update before a reminder
 
 
-export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string }) {
+export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string; sounds?: SoundTheme }) {
   enforcement = options.enforcement ?? 'soft'
+  soundTheme = options.sounds ?? 'soft'
   language = options.language ?? 'auto'
   // a matcher, so other features may hook session.start too
   on('session.start', { isInteractive: [true, false] }, async ($, e, next) => {
@@ -831,7 +836,8 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
     $.clock.after(900, () => play($, 'error'))
     $.clock.after(1800, () => play($, 'done'))
 
-    return { text: 'Sounds: decision, error, done.' }
+    if (soundTheme === 'off') return { text: locale === 'fr' ? 'Sons coupés (/still-mods sounds soft pour les remettre).' : 'Sounds are off (/still-mods sounds soft turns them on).' }
+    return { text: locale === 'fr' ? `Sons (${soundTheme}) : décision, erreur, terminé.` : `Sounds (${soundTheme}): decision, error, done.` }
   })
 
   // always drawn, so the person sees the mod is loaded; dim while there is nothing to show

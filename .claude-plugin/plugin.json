@@ -1,6 +1,6 @@
 {
   "name": "still-mods",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Personal mods above the prompt: plan progress bars and context, 5-hour and weekly usage meters",
   "author": {
     "name": "stillgbx",
@@ -21,6 +21,17 @@
       "options": [
         "strict",
         "soft",
+        "off"
+      ],
+      "default": "soft"
+    },
+    "sounds": {
+      "type": "string",
+      "title": "Sounds",
+      "description": "Sounds when a bar waits for a decision, fails or finishes: soft (still-mods' own), classic (plan-progress'), or off",
+      "options": [
+        "soft",
+        "classic",
         "off"
       ],
       "default": "soft"

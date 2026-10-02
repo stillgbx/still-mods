@@ -24,6 +24,13 @@ const FIELDS: Field[] = [
     fallback: 'soft',
     label: { en: 'How hard Claude is held to its bars', fr: 'Exigence envers Claude sur les barres' },
   },
+  {
+    name: 'sounds',
+    kind: 'choice',
+    choices: ['soft', 'classic', 'off'],
+    fallback: 'soft',
+    label: { en: 'Sounds for decision, error, done', fr: 'Sons de décision, erreur, fin' },
+  },
   { name: 'usageMeters', kind: 'boolean', fallback: true, label: { en: 'Context and limit meters', fr: 'Compteurs de contexte et de limites' } },
   { name: 'language', kind: 'choice', choices: ['auto', 'en', 'fr'], fallback: 'auto', label: { en: 'Labels language', fr: 'Langue des libellés' } },
   { name: 'timeZone', kind: 'text', fallback: 'Europe/Paris', label: { en: 'Reset time zone (IANA)', fr: 'Fuseau des heures de reset (IANA)' } },

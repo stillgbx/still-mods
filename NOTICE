@@ -8,7 +8,7 @@ credit for what they designed; the code here was combined, reorganised and exten
 plan-progress, by Kirill Serditov
 https://github.com/zycck/claude-mods (plugins/plan-progress, version 0.3.0)
 
-The plan progress bars (features/plan-progress.tsx, skills/plan-progress, sounds/) come from
+The plan progress bars (features/plan-progress.tsx, skills/plan-progress, sounds/classic/) come from
 plan-progress: the bar drawing, the plan_progress tool, the agent strips, the sounds and the rules
 that keep the bars up to date. It is used under the MIT License below.
 

@@ -13,6 +13,8 @@ Other options:
   - `strict`: a 4th change without a bar is refused once, a stale bar gets a reminder, and a turn that ends with an open bar is sent back.
   - `soft`: reminders only, nothing is refused or sent back.
   - `off`: no reminders; Claude uses the bars when it finds them useful.
+- `sounds` (`soft`, `classic`, `off`; default `soft`): the sounds when a bar waits for a decision,
+  fails or finishes. `soft` is still-mods' own (made by `tools/make-sounds.py`), `classic` plan-progress'.
 - `timeZone` (default `Europe/Paris`), the zone of the 5-hour reset time.
 - `language` (`auto`, `en`, `fr`; default `auto`): the labels' language. `auto` follows Claude Code's `language` setting, then the system locale.
 
@@ -40,7 +42,7 @@ it as it works. Up to 5 bars show at once; past that, finished ones go first.
 - The fill is the share of finished steps; the pixel texture in it is decoration.
 - Full-height lines mark stage boundaries, short ticks the steps.
 - The knob names the stage at work, or the step at work for a one-stage todo list, with its count.
-- The colour is the state: running, waiting for a decision, error, done (each with a soft sound).
+- The colour is the state: running, waiting for a decision, error, done (each with a sound, see `sounds`).
 
 ## Usage meters
 
@@ -65,6 +67,7 @@ weekly limit and the usage credits the desktop panel shows are not available to 
 - `features/settings.ts`: the `/still-mods` command, always on.
 - `features/band.ts`: stacks the parts of the band above the prompt.
 - `features/i18n.ts`: the labels in English and French.
+- `sounds/<theme>/`: the sound themes; `tools/make-sounds.py` synthesizes `sounds/soft/`.
 
 The engine follows `$` only into functions of the same file, so a feature keeps its hooks and the
 functions they hand `$` to in its own file. An event hooked without a matcher can be hooked only once
@@ -109,7 +112,7 @@ claude plugin validate .                              # the marketplace
 - `/still-mods-progress`: show or hide the bars.
 - `/still-mods-progress-demo`: add a sample bar, one of 5 at random.
 - `/still-mods-progress-clear`: remove every bar.
-- `/still-mods-progress-sounds`: play the decision, error and done sounds.
+- `/still-mods-progress-sounds`: play the decision, error and done sounds of the current theme.
 
 ## Credits
 
