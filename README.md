@@ -7,7 +7,7 @@ Personal Claude Code mods, in one plugin. Each feature can be switched on or off
 | Feature | Option | What it draws |
 | --- | --- | --- |
 | Plan progress | `planProgress` | Progress bars for multi-step tasks (stages, steps, subagent strips, sounds), above the prompt, on top |
-| Agents pane | `agentsPane` | A pane listing the session's subagents and what each one does, with the team's journal |
+| Agents pane | `agentsPane` | A pane with the main thread and a block per declared agent type, lit while one runs, what each one is asked, does and answers, a session log and the team's journal, with a demo |
 | End-of-turn notice | `turnNotify` | When a turn ran longer than `turnNotifySeconds` (60 by default): the done sound and a toast, `Claude a terminé en 4 min 12 s · 0,82 $` over `modèle 2 min 30 s, outils 1 min 42 s · 68 tok/s`; the decision sound when a call waits on your approval |
 | Git status | `gitStatus` | The status line under the prompt: branch, changed and new files, ahead/behind its upstream (`⎇ main · 3 modifiés · 1 nouveau · ↑1`) |
 | Usage meters | `usageMeters` | Context, prompt cache, session (5-hour) and weekly limits, always at the bottom: the share used and the detail on one line, the bar under it |
@@ -87,17 +87,37 @@ it as it works. Up to 5 bars show at once; past that, finished ones go first.
 
 `/still-mods-agents` opens or closes it (in `auto`, it opens by itself when a subagent starts).
 
-- **Agents**, from the engine's events in this session: each subagent's role (`subagentType`), state
-  (running, waiting for an approval, done, failed, stopped), time, the tool it runs now and on what
-  (a file, a command, a pattern), and how many tools it called. Running ones first, then the latest
-  finished.
+- **Main thread**, on top: its model, its effort (low to max, as four cells), what it runs now, or
+  idle.
+- **One block per agent type**, whether an agent of it runs or not, grouped in a frame by where the
+  type comes from: the project's (`.claude/agents`), the user's (`~/.claude/agents`), the built-in
+  ones, then one frame per enabled plugin (its `agents/` folder and the paths its manifest names).
+  The built-in types appear once the engine offers them to the model, at the first message.
+  - Lit while an agent of the type runs: its model, its effort, the tool it runs and on what (a
+    file, a command, a pattern), since when and how many calls; `×2` when two run.
+  - Faint and dashed otherwise: what the type is for, or how its last run ended (done, failed,
+    stopped), when and how long it took; `never run` for a type not used yet.
+- **Exchanges**: a button for the main thread and one per agent. An agent's shows what it was asked
+  (`main → role`), its calls, and its answer (`role → main`); the main thread's, what it sent to
+  its agents and what came back.
+- **Session log**: spawns, `SendMessage`s, answers, approvals waited on and failures, with the time;
+  an agent's tool calls dimmed.
 - **Session folder**: the newest folder under `agentsSessionsDir`, and which role files it holds
   (`brief.md`, `contrat.md`, `test.md`, `revue-ui.md`).
-- **Journal**: the newest entries of its `journal.md`, read every 4 seconds, one per line as
+- **Team journal**: the newest entries of its `journal.md`, read every 4 seconds, one per line as
   `HH:MM · role · type · #tag text`; `bloque`, `decision` and `resultat` are coloured.
 
-Agents started in another session are not listed (the journal, read from disk, shows them). The
-messages between the main thread and a subagent are not shown, only its tool calls.
+The desktop Code tab draws the main thread and the blocks as a graph (an SVG picture, in the
+`palette`'s colours: Opus in the waiting colour, Sonnet in the marker's, Haiku in the success
+colour, Fable in the running one); the terminal draws the same as rows. The pane redraws on events
+only, at most twice a second, so the picture does not flash: times are clock times, not running
+counters.
+
+The **Demo** button, at the top right, plays a made-up session: every kind of group, block and
+state, agents calling tools, waiting for an approval, answering or failing, the exchanges and the
+log filling in. What really happens meanwhile is still recorded, and comes back when the demo stops.
+
+Agents started in another session are not listed (the journal, read from disk, shows them).
 
 ## Usage meters
 
@@ -142,7 +162,7 @@ weekly limit and the usage credits the desktop panel shows are not available to 
 - `features/<feature>.tsx`: one feature, registering its own hooks.
 - `features/settings.ts`: the `/still-mods` command, always on.
 - `features/band.ts`: stacks the parts of the band above the prompt.
-- `features/agents.tsx`: the Agents pane.
+- `features/agents.tsx`: the Agents pane: the live state the hooks record, the one shown (live or the demo's), the graph and the rows.
 - `features/git-status.ts`: the git status line, from `git status --porcelain=v1 -b` in the session's
   folder, at start, after each call that may change the tree, and every 15 seconds.
 - `features/turn-notify.ts`: the end-of-turn notice. A mod cannot tell whether the app is in front,
