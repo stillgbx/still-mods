@@ -2,6 +2,8 @@
 
 Personal Claude Code mods, in one plugin. Each feature can be switched on or off on its own.
 
+![Plan bars with their costs over the context, cache, session and weekly meters, in Claude Desktop](docs/screenshot.png)
+
 | Feature | Option | What it draws |
 | --- | --- | --- |
 | Plan progress | `planProgress` | Progress bars for multi-step tasks (stages, steps, subagent strips, sounds), above the prompt, on top |
