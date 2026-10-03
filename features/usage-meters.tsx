@@ -1,12 +1,15 @@
 import type { EngineInterface, Register } from 'claude-code'
 
 import { stack } from './band'
-import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
+import { palette, type PaletteName } from './palettes'
+import { formatUsd, type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
 // Usage meters: context, 5-hour and weekly limit usage, adapted from usage-meter by HolyGrail
 // (https://github.com/HolyGrail/claude-mods): see NOTICE.
 
 let context: any = null
+// what the session has cost so far, in US dollars; null where the host keeps no ledger
+let costUsd: number | null = null
 let rateLimits: any[] = []
 // when rateLimits was last measured, in $.clock.now() milliseconds
 let measuredAt = 0
@@ -54,10 +57,41 @@ const PX_PER_COLUMN = 8
 const METER_GAP = 3
 const BAND_RESERVED_COLUMNS = 2
 const SVG_BAR_HEIGHT = 12
+// set from the palette option when the module registers
+let usesPalette = false
 const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff', tick: 'rgba(0,0,0,0.38)' }
 const MARKER_COLOR = 'cyan'
+// the hover card's background: a raw colour close to the band's in the app's dark theme (a theme key
+// the surface does not know makes it refuse the whole band)
+const CARD_BACKGROUND = '#2b2b2b'
+const CARD_MIN_CELLS = 40
 
-type Meter = { key: string; label: string; used: number | undefined; elapsed: number | null; detail: string; ticks?: number[] }
+type Meter = {
+  key: string
+  label: string
+  used: number | undefined
+  elapsed: number | null
+  detail: string
+  ticks?: number[]
+  // a figure and a colour of their own, where the bar measures something else (the cache)
+  percent?: string
+  status?: string | null
+  barStatus?: string
+  // the lines of the card shown over the meter while the pointer is on it
+  card?: string[]
+}
+
+// the main thread's prompt cache: the share of the last response's input it served, and when that
+// response came, from which the cache's time to live runs; kept per session in the store
+let cacheTtlMs = HOUR_MS
+// the cacheMeter option
+let cacheShown = true
+let cacheRate: number | null = null
+let lastResponseAt: number | null = null
+let cacheKey: string | null = null
+const CACHE_PREFIX = 'cache:'
+// the cache counts as nearly gone in the last part of its life
+const CACHE_LOW_SHARE = 0.15
 
 // session.start fires again on a reload: the store stays, these variables start over
 async function startUsageMeters($: EngineInterface) {
@@ -67,8 +101,10 @@ async function startUsageMeters($: EngineInterface) {
   rateLimits = []
   measuredAt = 0
   ownKey = KEY_PREFIX + (await $.session.id())
+  await loadCache($)
   const usage: any = await $.session.usage()
   context = usage.context
+  costUsd = typeof usage.cost?.usd === 'number' ? usage.cost.usd : null
   if (usage.rateLimits.length > 0) await publishSnapshot($, usage.rateLimits)
   await refresh($)
   ticker = $.clock.every(TICK_MS, async () => {
@@ -78,7 +114,12 @@ async function startUsageMeters($: EngineInterface) {
   $.ui.invalidate('ui.render')
 }
 
-export function registerUsageMeters(on: Parameters<Register>[0], options: { timeZone?: string; language?: string }) {
+export function registerUsageMeters(on: Parameters<Register>[0], options: { timeZone?: string; language?: string; palette?: PaletteName; cacheTtl?: '5m' | '1h'; cacheMeter?: boolean }) {
+  cacheTtlMs = options.cacheTtl === '5m' ? 5 * 60_000 : HOUR_MS
+  cacheShown = options.cacheMeter !== false
+  const p = palette(options.palette)
+  usesPalette = (options.palette ?? 'default') !== 'default'
+  Object.assign(SVG_COLORS, { success: p.success, warning: p.warning, error: p.danger, track: p.track, marker: p.marker })
   if (options.timeZone) timeZone = options.timeZone
   language = options.language ?? 'auto'
 
@@ -92,7 +133,7 @@ export function registerUsageMeters(on: Parameters<Register>[0], options: { time
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const rest = await next(e)
     const meters = await usageMeters($, e)
-    return stack($.ui.resolve(e).Box, [rest, meters]) ?? rest
+    return stack($.ui.resolve(e).Box, [['above-meters', rest], ['usage-meters', meters]]) ?? rest
   })
   on('session.end', async ($, e, next) => {
     if (!FINAL_REASONS.includes(e.reason) || !ownKey) return next(e)
@@ -109,12 +150,27 @@ export function registerUsageMeters(on: Parameters<Register>[0], options: { time
       ownKey = key
     }
     context = ((await $.session.usage()) as any).context
+    const since = (e as unknown as { seconds_since_last_response?: number }).seconds_since_last_response
+    if (typeof since === 'number') await saveCache($, cacheRate, (await $.clock.now()) - since * 1000)
     $.ui.invalidate('ui.render')
     return next(e)
   })
 
+  // each response of the main thread: how much of its input the cache served, and the time it came
+  on('turn.step', { turnId: /^/ }, async function* ($, e, next) {
+    const result = yield* next(e)
+    const usage = result.usage
+    if (!e.agentId && usage) {
+      const input = usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens
+      await saveCache($, input > 0 ? (usage.cache_read_input_tokens / input) * 100 : cacheRate, await $.clock.now())
+      $.ui.invalidate('ui.render')
+    }
+    return result
+  })
+
   on('session.measure', async ($, e, next) => {
     context = e.context
+    if (typeof e.cost?.usd === 'number') costUsd = e.cost.usd
     if (e.changed.includes('rateLimits')) await remember($, e.rateLimits as any[])
     $.ui.invalidate('ui.render')
     return next(e)
@@ -125,25 +181,32 @@ async function usageMeters($: EngineInterface, e: any): Promise<any> {
   const elements: any = $.ui.resolve(e)
   const now = await $.clock.now()
   const L = strings(locale)
-  const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail(), ticks: CONTEXT_TICKS }]
+  const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail(), ticks: CONTEXT_TICKS, card: contextCard() }]
+  if (cacheShown) meters.push(cacheMeter(now))
   for (const limit of rateLimits) meters.push(readLimit(limit, now))
   // the windows arrive with the first API response; until then they show as unknown
   for (const kind of ALWAYS_SHOWN) {
-    if (!rateLimits.some(l => l.kind === kind)) meters.push({ key: kind, label: titleOf(kind), used: undefined, elapsed: null, detail: L.waiting })
+    if (!rateLimits.some(l => l.kind === kind)) meters.push({ key: kind, label: titleOf(kind), used: undefined, elapsed: null, detail: L.waiting, card: [windowTitle(kind), L.cardWaiting] })
   }
   const columns = e.props.bodyColumns ?? 0
   const room = columns - BAND_RESERVED_COLUMNS
-  // side by side when every column gets its minimum, else one under the other (a phone)
-  const isRow = room - METER_GAP * (meters.length - 1) >= MIN_BAR_CELLS * meters.length
-  const cells = isRow ? Math.floor((room - METER_GAP * (meters.length - 1)) / meters.length) : Math.max(MIN_BAR_CELLS, room)
+  // as many meters on a row as fit whole, their title, figure and detail untruncated; the rows
+  // balanced (4 meters as 2 + 2, not 3 + 1), down to one per row on a phone
+  const need = Math.max(MIN_BAR_CELLS, ...meters.map(widthOf))
+  const fit = Math.max(1, Math.min(meters.length, Math.floor((room + METER_GAP) / (need + METER_GAP))))
+  const rowCount = Math.ceil(meters.length / fit)
+  const perRow = Math.ceil(meters.length / rowCount)
+  const cells = Math.max(MIN_BAR_CELLS, Math.floor((room - METER_GAP * (perRow - 1)) / perRow))
   const gauge = 'Svg' in elements ? 'svg' : 'text'
+  const rows = Array.from({ length: rowCount }, (_, r) => meters.slice(r * perRow, (r + 1) * perRow))
   // equal columns from edge to edge, each two lines: the figures, then the bar
   return elements.Box({
     key: 'usage-meters',
-    flexDirection: isRow ? 'row' : 'column',
-    columnGap: METER_GAP,
+    flexDirection: 'column',
     rowGap: 1,
-    children: meters.map(m => meter(elements, gauge, cells, m)),
+    children: rows.map((row, r) =>
+      elements.Box({ key: `meters-row-${r}`, flexDirection: 'row', columnGap: METER_GAP, children: row.map(m => meter(elements, gauge, cells, m)) }),
+    ),
   })
 }
 
@@ -222,7 +285,92 @@ function readLimit(limit: any, now: number): Meter {
   if (resetsAtMs != null && resetsAtMs <= now) return { key: limit.kind, label, used: 0, elapsed: window?.ms ? 0 : null, detail: '', ticks: divisionPoints(window?.divisions) }
   const elapsed = window?.ms && resetsAtMs != null ? clamp(100 - ((resetsAtMs - now) / window.ms) * 100) : null
   const detail = resetsAtMs == null ? '' : strings(locale).resetsIn(untilReset(resetsAtMs - now)) + ' · ' + resetClock(resetsAtMs, window?.showsDay === true)
-  return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail, ticks: divisionPoints(window?.divisions) }
+  const card = limitCard(limit.kind, limit.percentUsed, elapsed, resetsAtMs, now)
+  return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail, ticks: divisionPoints(window?.divisions), card }
+}
+
+// what a limit's card says: the window, the share used against the time gone and what that pace
+// means, the reset, and how to read the bar
+function limitCard(kind: string, used: number, elapsed: number | null, resetsAtMs: number | null, now: number) {
+  const L = strings(locale)
+  const lines = [windowTitle(kind)]
+  if (elapsed != null) {
+    const margin = elapsed - used
+    const pace = margin >= GREEN_MIN_MARGIN ? 'under' : margin < RED_BELOW_MARGIN ? 'over' : 'near'
+    lines.push(`${L.cardUsed(Math.round(used) + '%', Math.round(elapsed) + '%')} · ${L.cardPace[pace]}`)
+  } else {
+    lines.push(Math.round(used) + '%')
+  }
+  if (resetsAtMs != null) lines.push(L.cardReset(resetClock(resetsAtMs, WINDOWS[kind]?.showsDay === true), untilReset(resetsAtMs - now)))
+  if (kind === 'five_hour') lines.push(L.cardTicksHours)
+  if (kind === 'seven_day') lines.push(L.cardTicksDays)
+  return lines
+}
+
+function windowTitle(kind: string) {
+  const L = strings(locale)
+  return kind === 'five_hour' ? L.cardFiveHour : kind === 'seven_day' ? L.cardSevenDay : titleOf(kind)
+}
+
+// what the context's card says: the tokens in the window, the session's cost, the cuts
+function contextCard() {
+  const L = strings(locale)
+  if (!context?.window) return [L.cardCtxNone]
+  const pct = typeof context.percent === 'number' ? Math.round(context.percent) + '%' : '—'
+  const tokens = typeof context.tokens === 'number' ? formatTokens(context.tokens) : '—'
+  const lines = [L.cardCtx(tokens, formatTokens(context.window), pct)]
+  if (costUsd != null) lines.push(L.cardCost(formatUsd(locale, costUsd)))
+  lines.push(L.cardCtxTicks)
+  return lines
+}
+
+// the cache column: its hit rate as the figure, the time it has left as the bar, which drains
+function cacheMeter(now: number): Meter {
+  const L = strings(locale)
+  const rate = cacheRate == null ? '—' : Math.round(cacheRate) + '%'
+  const rateStatus = cacheRate == null ? null : cacheRate >= 80 ? 'success' : cacheRate >= 50 ? 'warning' : 'error'
+  const tokens = typeof context?.tokens === 'number' ? formatTokens(context.tokens) : null
+  if (lastResponseAt == null) return { key: 'cache', label: L.cache, used: undefined, elapsed: null, detail: L.waiting, percent: rate, status: rateStatus, card: [L.cardCacheNone] }
+  const at = resetClock(lastResponseAt, false)
+  const left = lastResponseAt + cacheTtlMs - now
+  if (left <= 0) {
+    const card = [L.cardCacheRate(rate), L.cardCacheCold(at), ...(tokens ? [L.cardCacheNext(tokens)] : [])]
+    return { key: 'cache', label: L.cache, used: 0, elapsed: null, detail: L.cold, percent: rate, status: rateStatus, card }
+  }
+  const share = (left / cacheTtlMs) * 100
+  const card = [L.cardCacheRate(rate), L.cardCacheWarm(at, resetClock(lastResponseAt + cacheTtlMs, false), untilReset(left)), ...(tokens ? [L.cardCacheNext(tokens)] : [])]
+  return {
+    card,
+    key: 'cache',
+    label: L.cache,
+    used: share,
+    elapsed: null,
+    detail: L.warm(untilReset(left)),
+    percent: rate,
+    status: rateStatus,
+    // the bar's own colour: green while it has time, orange near the end
+    barStatus: share / 100 <= CACHE_LOW_SHARE ? 'warning' : 'success',
+  }
+}
+
+async function loadCache($: EngineInterface) {
+  cacheKey = CACHE_PREFIX + (await $.session.id())
+  const saved: any = await $.store.get(cacheKey)
+  cacheRate = typeof saved?.rate === 'number' ? saved.rate : null
+  lastResponseAt = typeof saved?.at === 'number' ? saved.at : null
+  // other sessions' readings past any cache's life say nothing; their keys go
+  const cutoff = (await $.clock.now()) - 2 * HOUR_MS
+  for (const key of await $.store.keys()) {
+    if (!key.startsWith(CACHE_PREFIX) || key === cacheKey) continue
+    const other: any = await $.store.get(key)
+    if (typeof other?.at !== 'number' || other.at < cutoff) await $.store.delete(key)
+  }
+}
+
+async function saveCache($: EngineInterface, rate: number | null, at: number) {
+  cacheRate = rate
+  lastResponseAt = at
+  if (cacheKey) await $.store.set(cacheKey, { rate, at })
 }
 
 function titleOf(kind: string) {
@@ -231,8 +379,14 @@ function titleOf(kind: string) {
   return typeof L[title] === 'string' ? (L[title] as string) : title
 }
 
-// tokens in the window and its size, as 210k / 1M
+// the session's cost, then the tokens in the window and its size: 3,42 $ · 210k / 1M
 function contextDetail() {
+  const cost = costUsd == null ? '' : formatUsd(locale, costUsd)
+  const tokens = contextTokens()
+  return cost && tokens ? `${cost} · ${tokens}` : cost || tokens
+}
+
+function contextTokens() {
   if (!context?.window) return ''
   const used = typeof context.tokens === 'number' ? context.tokens : typeof context.percent === 'number' ? (context.percent / 100) * context.window : null
   return used == null ? formatTokens(context.window) : formatTokens(used) + ' / ' + formatTokens(context.window)
@@ -253,11 +407,20 @@ function statusOf(used: number, elapsed: number | null) {
   return 'success'
 }
 
+// the cells a meter's first line takes whole: title, figure, two spaces, detail
+function widthOf(m: Meter) {
+  const percent = m.percent ?? (typeof m.used === 'number' ? Math.round(m.used) + '%' : '—')
+  return [...m.label].length + 1 + [...percent].length + 2 + [...m.detail].length
+}
+
 // two lines in one column: the title and the share used, the reset dimmed at the right; then the bar
-function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, label, used, elapsed, detail, ticks }: Meter) {
+function meter({ Box, Text, Svg }: any, gauge: string, cells: number, m: Meter) {
+  const { key, label, used, elapsed, detail, ticks } = m
   const known = typeof used === 'number'
-  const status = known ? statusOf(used, elapsed) : null
-  const percent = known ? Math.round(used) + '%' : '—'
+  const barStatus = m.barStatus ?? (known ? statusOf(used, elapsed) : null)
+  const status = m.status !== undefined ? m.status : barStatus
+  const percent = m.percent ?? (known ? Math.round(used) + '%' : '—')
+  const hasFigure = m.percent !== undefined ? m.percent !== '—' : known
   const head = Box({
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -267,7 +430,7 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, lab
         flexDirection: 'row',
         columnGap: 1,
         flexShrink: 0,
-        children: [Text({ bold: true, children: [label] }), Text({ bold: true, ...(known ? { color: status } : { dimColor: true }), children: [percent] })],
+        children: [Text({ bold: true, children: [label] }), Text({ bold: true, ...(hasFigure ? { color: textColor(status) } : { dimColor: true }), children: [percent] })],
       }),
       Text({ dimColor: true, wrap: 'truncate', children: [detail] }),
     ],
@@ -275,13 +438,33 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, { key, lab
   const bar =
     gauge === 'svg'
       ? Svg({
-          source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, status, ticks),
+          source: svgBar(cells * PX_PER_COLUMN, known ? used : 0, elapsed, barStatus, ticks),
           alt: `${label} ${percent}${detail ? ', ' + detail : ''}${elapsed == null ? '' : ', ' + Math.round(elapsed) + '%'}`,
           width: cells * PX_PER_COLUMN,
           height: SVG_BAR_HEIGHT,
         })
-      : textBar(Text, cells, known ? used : 0, elapsed, status, ticks)
-  return Box({ key: 'meter-' + key, flexDirection: 'column', width: cells, flexShrink: 0, children: [head, bar] })
+      : textBar(Text, cells, known ? used : 0, elapsed, barStatus, ticks)
+  const children = [head, bar]
+  if (m.card && m.card.length > 0) children.push(hoverCard(Box, Text, m.card, cells))
+  return Box({ key: 'meter-' + key, flexDirection: 'column', width: cells, flexShrink: 0, children })
+}
+
+// a card for the meter, drawn hidden and shown by the surface while the pointer is on the meter's
+// keyed box: no hook runs. The desktop draws it as a floating card over the band, with its own border
+function hoverCard(Box: any, Text: any, lines: string[], cells: number) {
+  // no key of its own: a keyed Box is its own hover scope, and a hidden one can never be hovered
+  return Box({
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: Math.max(cells, CARD_MIN_CELLS),
+    display: 'none',
+    hover: { display: 'flex' },
+    flexDirection: 'column',
+    paddingX: 1,
+    backgroundColor: CARD_BACKGROUND,
+    children: lines.map((line, i) => Text({ key: `card-${i}`, wrap: 'wrap', ...(i === 0 ? { bold: true } : {}), children: [line] })),
+  })
 }
 
 // used cells in the status color, the rest dim, and the time marker
@@ -291,7 +474,7 @@ function textBar(Text: any, cells: number, used: number, elapsed: number | null,
   const tickCells = new Set(ticks.map(f => Math.round(f * cells)))
   const marker = elapsed == null ? -1 : Math.min(cells - 1, Math.floor((elapsed / 100) * cells))
   const markerStyle = { color: MARKER_COLOR, bold: true }
-  const usedStyle = status ? { color: status } : { dimColor: true }
+  const usedStyle = status ? { color: textColor(status) } : { dimColor: true }
   const restStyle = { dimColor: true }
   const runs: { text: string; style: object }[] = []
   for (let i = 0; i < cells; i++) {
@@ -337,6 +520,12 @@ function svgBar(width: number, used: number, elapsed: number | null, status: str
 function divisionPoints(divisions?: number) {
   if (!divisions || divisions < 2) return []
   return Array.from({ length: divisions - 1 }, (_, i) => (i + 1) / divisions)
+}
+
+// a palette's own hex, else the surface's theme colour of that name (success, warning, error)
+function textColor(status: string | null) {
+  if (!status) return undefined
+  return usesPalette ? SVG_COLORS[status] : status
 }
 
 function clamp(percent: number) {

@@ -2,11 +2,15 @@
 
 Personal Claude Code mods, in one plugin. Each feature can be switched on or off on its own.
 
+![Plan bars with their costs over the context, cache, session and weekly meters, in Claude Desktop](docs/screenshot.png)
+
 | Feature | Option | What it draws |
 | --- | --- | --- |
 | Plan progress | `planProgress` | Progress bars for multi-step tasks (stages, steps, subagent strips, sounds), above the prompt, on top |
 | Agents pane | `agentsPane` | A pane listing the session's subagents and what each one does, with the team's journal |
-| Usage meters | `usageMeters` | Context, session (5-hour) and weekly limits, always at the bottom: one column each, the share used and the reset time on one line, the bar under it |
+| End-of-turn notice | `turnNotify` | When a turn ran longer than `turnNotifySeconds` (60 by default): the done sound and a toast, `Claude a terminé en 4 min 12 s · 0,82 $` over `modèle 2 min 30 s, outils 1 min 42 s · 68 tok/s`; the decision sound when a call waits on your approval |
+| Git status | `gitStatus` | The status line under the prompt: branch, changed and new files, ahead/behind its upstream (`⎇ main · 3 modifiés · 1 nouveau · ↑1`) |
+| Usage meters | `usageMeters` | Context, prompt cache, session (5-hour) and weekly limits, always at the bottom: the share used and the detail on one line, the bar under it |
 
 Other options:
 
@@ -21,6 +25,7 @@ Other options:
 - `agentsSessionsDir` (default `_generated-ai-doc/sessions`): the folder, from the project root, that
   holds the team's session folders; the pane shows the newest one's `journal.md`.
 - `timeZone` (default `Europe/Paris`), the zone of the 5-hour reset time.
+- `palette` (default `default`): the colours of the bars and meters, see [Palettes](#palettes).
 - `language` (`auto`, `en`, `fr`; default `auto`): the labels' language. `auto` follows Claude Code's `language` setting, then the system locale.
 
 Change them with the `/still-mods` command, which works in the desktop Code tab too (it has no `/config` menu):
@@ -29,6 +34,7 @@ Change them with the `/still-mods` command, which works in the desktop Code tab 
 /still-mods                     show the options
 /still-mods usageMeters off     switch a feature off
 /still-mods timeZone Asia/Tokyo set a text option
+/still-mods palette dracula     pick a palette
 ```
 
 They are also rows in the terminal's `/config` menu. A plugin loaded from a folder has no such rows in
@@ -39,6 +45,30 @@ the desktop app, so `/still-mods` then writes the option in `~/.claude/settings.
 "pluginConfigs": { "still-mods": { "options": { "usageMeters": false } } }
 ```
 
+## Palettes
+
+The `palette` option colours what the mod draws, from popular editor themes:
+
+| Palette | Variant | Source |
+| --- | --- | --- |
+| `default` | | still-mods' own colours |
+| `catppuccin-mocha` | dark | [catppuccin/palette](https://github.com/catppuccin/palette) |
+| `catppuccin-latte` | light | [catppuccin/palette](https://github.com/catppuccin/palette) |
+| `dracula` | dark | [Dracula spec](https://draculatheme.com/spec) |
+| `alucard` | light (Dracula's) | [Dracula spec](https://draculatheme.com/spec) |
+| `night-owl` | dark | [sdras/night-owl-vscode-theme](https://github.com/sdras/night-owl-vscode-theme) |
+| `synthwave-84` | dark | [robb0wen/synthwave-vscode](https://github.com/robb0wen/synthwave-vscode) |
+| `tokyo-night` | dark (Storm) | [folke/tokyonight.nvim](https://github.com/folke/tokyonight.nvim) |
+
+Each palette sets the plan bars' state colours (running, waiting, error, done) and the meters' fills
+(green, orange, red), track and time marker, with every value taken from the theme's own repository.
+
+- Only the mod's drawings change: a mod cannot restyle the app, so its text and background stay.
+- A mod cannot tell whether the app is light or dark, so each palette names its variant: pick the
+  one that matches the app.
+- A knob's text stays white while it keeps a 3:1 contrast, and turns near black on a lighter fill
+  (pastel palettes such as Catppuccin Mocha).
+
 ## Plan bars
 
 Claude creates a bar for a multi-step task through the `plan_progress` tool (2 to 10 stages) and moves
@@ -47,6 +77,10 @@ it as it works. Up to 5 bars show at once; past that, finished ones go first.
 - The fill is the share of finished steps; the pixel texture in it is decoration.
 - Full-height lines mark stage boundaries, short ticks the steps.
 - The knob names the stage at work, or the step at work for a one-stage todo list, with its count.
+- A bar shows what its task cost: the session's cost since the bar opened, fixed when it is done,
+  subagents included (two bars open at once each count the whole interval). The samples of
+  `/still-mods-progress-demo` carry made-up costs. The amounts sit in a column before the percentage, on one line, or as the
+  figure over its currency when the band is too narrow.
 - The colour is the state: running, waiting for a decision, error, done (each with a sound, see `sounds`).
 
 ## Agents pane
@@ -69,13 +103,30 @@ messages between the main thread and a subagent are not shown, only its tool cal
 
 One column each for the context, the session (5-hour) limit and the weekly limit: the title and the
 share used, the reset time dimmed at the right (`↻ 32 min · 15:00`), and the bar under them. The
-context shows its tokens instead (`210k / 1M`).
+context shows the session's cost and its tokens instead (`3,42 $ · 210k / 1M`).
 
-On a narrow screen (a phone) the meters stack one under the other.
+The cost is the engine's ledger for the session, at API prices: on a subscription it is what the
+work would cost through the API, not what is billed. Where the host keeps no ledger it is left out.
+
+The meters sit on as few rows as keep every title, figure and detail whole, the rows balanced: one
+row of four on a wide band, two by two on a medium one, one per row on a phone.
 
 Thin cuts split the session bar into its 5 hours and the weekly bar into its 7 days, counted from
 the window's start: the fill against them tells whether usage keeps to the average. The context bar
 has a cut at every 10 % from 50 %.
+
+A **Cache** column (option `cacheMeter`) follows the context. Its figure is the share of the last
+main-thread response's input the prompt cache served: green from 80 %, orange from 50 %, red under. A
+drop means something broke the cache (tools, model or instructions changed). Its bar is the time the
+cache has left since that response, draining, orange in its last 15 %: `chaud · 41 min`, then `froid`
+once it expired, when the next message writes the whole context to the cache again. The lifetime is
+the `cacheTtl` option (`1h` by default, or `5m`): the engine does not say it at any time.
+
+Hovering a meter shows a card that explains it: the context's tokens and the session's cost; a limit's
+window, its share used against the time gone and what that pace means, its reset and how to read the
+bar; the cache's hit rate, when the last response came and when the cache expires. The surface shows
+and hides the card itself (no hook runs); there is none without a pointer (a terminal without a mouse,
+the mobile app).
 
 The blue line is the time gone in the window. A fill short of it means the limit lasts until the
 reset; a fill past it means usage runs ahead of time. The colour says the same: green at least 10
@@ -92,7 +143,12 @@ weekly limit and the usage credits the desktop panel shows are not available to 
 - `features/settings.ts`: the `/still-mods` command, always on.
 - `features/band.ts`: stacks the parts of the band above the prompt.
 - `features/agents.tsx`: the Agents pane.
+- `features/git-status.ts`: the git status line, from `git status --porcelain=v1 -b` in the session's
+  folder, at start, after each call that may change the tree, and every 15 seconds.
+- `features/turn-notify.ts`: the end-of-turn notice. A mod cannot tell whether the app is in front,
+  so the threshold is what keeps short answers silent.
 - `features/i18n.ts`: the labels in English and French.
+- `features/palettes.ts`: the colour palettes, each value taken from the theme's own repository.
 - `sounds/<theme>/`: the sound themes; `tools/make-sounds.py` synthesizes `sounds/soft/`.
 
 The engine follows `$` only into functions of the same file, so a feature keeps its hooks and the
@@ -150,5 +206,9 @@ still-mods started from the ideas and the work of two mods, combined here and ex
   that keep the bars up to date.
 - **[usage-meter](https://github.com/HolyGrail/claude-mods)** by HolyGrail: the context and limit
   meters, the readings shared between sessions, the pace colours and the time marker.
+
+The palettes take their values from the themes' own repositories: [Catppuccin](https://github.com/catppuccin/palette),
+[Dracula and Alucard](https://draculatheme.com/spec), [Night Owl](https://github.com/sdras/night-owl-vscode-theme),
+[SynthWave '84](https://github.com/robb0wen/synthwave-vscode) and [Tokyo Night](https://github.com/folke/tokyonight.nvim).
 
 Their notices are in [NOTICE](NOTICE). still-mods itself is under the MIT License ([LICENSE](LICENSE)).

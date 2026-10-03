@@ -5,7 +5,8 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { AgentRun, Plan, PlanStage, PlanState, PlanStep, StepStatus } from '../types'
 import { stack } from './band'
-import { type Locale, resolveLocale, strings, systemLocale } from './i18n'
+import { palette, type PaletteName } from './palettes'
+import { formatUsd, type Locale, resolveLocale, strings, systemLocale } from './i18n'
 
 const TOOL = 'mcp__still-mods__plan_progress'
 const plans = atom({ plugin: 'still-mods', key: 'plans' } as const, [])
@@ -19,6 +20,7 @@ const STRIP_GAP = 3
 const MAX_STRIPS = 4 // past this, the finished ones fold into one "+N more" strip
 const FOLD_MS = 5000 // finished strips stay this long, failed ones stay until the bar closes
 
+// set from the palette option when the module registers
 const STATE_COLOR: Record<PlanState, string> = { running: '#8B7CF6', needs_input: '#E09A1E', error: '#E5484D', done: '#30A46C' }
 const STATE_GLYPH: Record<PlanState, string> = { running: '●', needs_input: '?', error: '!', done: '✓' }
 const STATUSES: StepStatus[] = ['pending', 'active', 'done', 'error', 'skipped']
@@ -249,13 +251,24 @@ const DEMOS: ((now: number) => Omit<Plan, 'id'>)[] = [
 ]
 
 // a template not on screen yet when one is left, under an id of its own so it adds a bar
-function demoPlan(now: number, shown: Plan[]): Plan {
+// what each sample has cost so far, in US dollars, in the order of DEMOS
+const DEMO_SPENT = [1.27, 0.18, 0.46, 2.35, 0.62]
+
+// a template not on screen yet when one is left, under an id of its own so it adds a bar; its cost
+// is made up: a start that far back in the session's ledger, or the whole for a finished one
+function demoPlan(now: number, shown: Plan[], usd: number | null): Plan {
   const titles = new Set(shown.map(p => p.title))
-  const made = DEMOS.map(make => make(now))
-  const fresh = made.filter(p => !titles.has(p.title))
+  const made = DEMOS.map((make, i) => ({ plan: make(now), spent: DEMO_SPENT[i] ?? 0.5 }))
+  const fresh = made.filter(d => !titles.has(d.plan.title))
   const pool = fresh.length > 0 ? fresh : made
   const pick = pool[Math.floor(Math.random() * pool.length)] ?? made[0]!
-  return { ...pick, id: `demo-${now.toString(36)}` }
+  const isDone = pick.plan.state === 'done'
+  return {
+    ...pick.plan,
+    id: `demo-${now.toString(36)}`,
+    costStart: usd == null ? null : usd - pick.spent,
+    cost: isDone ? pick.spent : null,
+  }
 }
 
 // ---------- drawing ----------
@@ -276,6 +289,17 @@ function where(p: Plan): Where {
 function currentStep(p: Plan): PlanStep | undefined {
   const steps = p.stages.flatMap(s => s.steps)
   return steps.find(st => st.status === 'active') ?? steps.find(st => !isFinished(st.status))
+}
+
+// the knob's text colour on a fill: white, or near black on a fill too light for it
+function inkOn(fill: string) {
+  const [r, g, b] = hex(fill).map(v => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  })
+  const lum = 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
+  // white while it keeps 3:1 (WCAG's floor for bold text), as on the default colours; dark past that
+  return 1.05 / (lum + 0.05) >= 3 ? '#fff' : '#1c1b22'
 }
 
 const hex = (h: string) => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16))
@@ -361,6 +385,8 @@ function trackSvg(p: Plan, W: number): string {
   // knob: a pill with stage and count, or a round dot with the stage number when narrow
   const isNarrow = W < NARROW
   const color = STATE_COLOR[p.state]
+  // the knob's text and icon: white on a dark fill, near black on a light one (pastel palettes)
+  const ink = inkOn(color)
   const icon = ICON_PATH[p.state]
   const single = p.stages.length === 1
   const number = single ? Math.min(w.total, w.pos + 1) : w.stage + 1
@@ -369,7 +395,7 @@ function trackSvg(p: Plan, W: number): string {
   if (isNarrow) {
     const label = done ? '' : String(number)
     knob = `<circle cx="0" cy="${H / 2}" r="${H / 2}" fill="${color}"/>${
-      done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
+      done ? `<path d="${ICON_PATH.done}" transform="translate(-6 5) scale(.5)" fill="none" stroke="${ink}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>` : `<text x="0" y="${H / 2 + 4.2}" text-anchor="middle" class="kt">${label}</text>`
     }`
   } else {
     // one stage (a todo list): the step at work names the knob; several: the stage at work
@@ -387,7 +413,7 @@ function trackSvg(p: Plan, W: number): string {
     kw = Math.round(20 + iconW + textWidth(shown) + 6 + countW)
     const left = -kw / 2 + 10
     knob = `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>`
-    if (icon) knob += `<path d="${icon}" transform="translate(${left} 5) scale(.5)" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
+    if (icon) knob += `<path d="${icon}" transform="translate(${left} 5) scale(.5)" fill="none" stroke="${ink}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
     knob += `<text x="${left + iconW}" y="${H / 2 + 4.2}" class="kt">${esc(shown)}<tspan class="kc" dx="6">${count}</tspan></text>`
   }
   const clampX = (x: number) => Math.max(kw / 2, Math.min(W - kw / 2, x))
@@ -402,7 +428,7 @@ rect[class]{width:2px;height:2px}
 .t0,.t1,.t2,.t3{animation:tw ${done ? 3.2 : 2.2}s ease-in-out infinite}
 .t1{animation-duration:${done ? 3.8 : 2.8}s;animation-delay:-.7s}.t2{animation-duration:${done ? 4.4 : 1.9}s;animation-delay:-1.3s}.t3{animation-duration:${done ? 3.5 : 3.3}s;animation-delay:-.4s}
 @keyframes tw{0%,100%{opacity:1}50%{opacity:${done ? 0.8 : 0.45}}}
-.kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:#fff}
+.kt{font:500 12px 'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,'Segoe UI',sans-serif;fill:${ink}}
 .kc{font-weight:400;fill-opacity:.75}
 @media (prefers-reduced-motion:reduce){.t0,.t1,.t2,.t3{animation:none}}
 </style>`
@@ -422,6 +448,12 @@ const AGENT_COLOR: Record<AgentRun['state'], string> = {
   waiting: STATE_COLOR.needs_input,
   done: STATE_COLOR.done,
   error: STATE_COLOR.error,
+}
+
+function applyPalette(name: PaletteName | undefined) {
+  const p = palette(name)
+  Object.assign(STATE_COLOR, { running: p.running, needs_input: p.waiting, error: p.error, done: p.done })
+  Object.assign(AGENT_COLOR, { running: p.running, waiting: p.waiting, error: p.error, done: p.done })
 }
 
 const elapsed = (ms: number) => {
@@ -556,12 +588,36 @@ function chime($: EngineInterface, prev: PlanState | undefined, next: PlanState)
 
 async function putPlan($: EngineInterface, next: Plan) {
   let prev: Plan | undefined
+  const usd = await sessionUsd($)
   await update($, plans, list => {
     prev = list.find(p => p.id === next.id)
-    return placeBar(list, next)
+    // the cost runs from the bar's opening; it is fixed when the bar first turns done
+    const costStart = prev ? (prev.costStart ?? null) : (next.costStart ?? usd)
+    const isDoneNow = next.state === 'done' && prev?.state !== 'done'
+    const cost = next.cost ?? (isDoneNow && costStart != null && usd != null ? usd - costStart : (prev?.cost ?? null))
+    return placeBar(list, { ...next, costStart, cost: next.state === 'done' ? cost : null })
   })
   chime($, prev?.state, next.state)
   if (!prev) await update($, isOpen, () => true)
+}
+
+// an amount as two lines, the figure and then its currency: "2,53 $" or "$2.53" -> ["2,53", "$"]
+function splitCurrency(amount: string) {
+  if (!amount) return []
+  const figure = amount.replace(/\s*\$\s*/, '')
+  return [figure, '$']
+}
+
+// a bar's cost: fixed once it is done, else the session's cost since it opened; null under half a cent
+function spentOn(p: Plan, usdNow: number | null) {
+  const spent = p.state === 'done' ? p.cost : p.costStart != null && usdNow != null ? usdNow - p.costStart : null
+  return spent != null && spent >= 0.005 ? spent : null
+}
+
+// what the session has cost so far in US dollars, or null where the host keeps no ledger
+async function sessionUsd($: EngineInterface) {
+  const usage = await $.session.usage()
+  return typeof usage.cost?.usd === 'number' ? usage.cost.usd : null
 }
 
 // ---------- agents: drawn from engine events alone, no model calls ----------
@@ -649,7 +705,8 @@ const WORK_BEFORE_PLAN = 3 // the 4th changing call without a plan is refused on
 const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update before a reminder
 
 
-export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string; sounds?: SoundTheme }) {
+export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string; sounds?: SoundTheme; palette?: PaletteName }) {
+  applyPalette(options.palette)
   enforcement = options.enforcement ?? 'soft'
   soundTheme = options.sounds ?? 'soft'
   language = options.language ?? 'auto'
@@ -663,7 +720,7 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const bars = await planBars($, e)
     const rest = await next(e)
-    return stack($.ui.resolve(e).Box, [bars, rest]) ?? rest
+    return stack($.ui.resolve(e).Box, [['plan-bars', bars], ['below-plans', rest]]) ?? rest
   })
 
   // per-turn bookkeeping; module variables are fine here, a reload just starts a fresh count
@@ -819,7 +876,7 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   })
 
   on('command.run', { command: 'still-mods-progress-demo' }, async $ => {
-    await putPlan($, demoPlan(await $.clock.now(), await read($, plans)))
+    await putPlan($, demoPlan(await $.clock.now(), await read($, plans), await sessionUsd($)))
     await update($, isOpen, () => true)
 
     return { text: locale === 'fr' ? 'Barre d’exemple ajoutée au-dessus du prompt.' : 'Sample bar added above the prompt.' }
@@ -981,8 +1038,18 @@ export async function planBars($: EngineInterface, e: any): Promise<any> {
   // so rows line up whatever their titles; the slack goes into the gap after the title.
   // Desktop reports ~8 CSS px per column; glyph, gaps, percent and the close button take ~126 px.
   const titleWidth = Math.min(Math.round(total * 0.3), Math.max(...list.map(p => Math.round(textWidth(p.title, 6.4)))))
-  const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140))
   await read($, tick)
+  const usdNow = await sessionUsd($)
+  // the cost column: as wide as the widest amount, kept on one line and right-aligned, its room taken
+  // from the track so every row still lines up
+  const costs = list.map(p => spentOn(p, usdNow)).map(v => (v == null ? '' : formatUsd(locale, v)))
+  const oneLine = Math.max(0, ...costs.map(c => [...c].length))
+  // too narrow for the amounts on one line: the figure above, the currency under it
+  const isTight = oneLine > 0 && total - titleWidth - 140 - (oneLine * 8 + 8) < 120
+  const costLines = costs.map(c => (isTight ? splitCurrency(c) : [c]))
+  const costCells = Math.max(0, ...costLines.flat().map(c => [...c].length))
+  const costPx = costCells > 0 ? costCells * 8 + 8 : 0
+  const trackW = Math.max(120, Math.min(1400, total - titleWidth - 140 - costPx))
   const now = await $.clock.now()
   // a hairline between task bars, so each bar and its agent strips read as one group
   const divider = `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="1"><rect width="${total}" height="1" fill="#808080" fill-opacity=".22"/></svg>`
@@ -1022,6 +1089,15 @@ export async function planBars($: EngineInterface, e: any): Promise<any> {
                 <Text color={color}>{` ${stageName} ${w.step}/${w.stageSize}`}</Text>
               </Text>
             )}
+            {costCells > 0 ? (
+              <Box key={`cost-${p.id}`} width={costCells} flexShrink={0} flexDirection="column" alignItems="flex-end">
+                {(costLines[i] ?? []).map((line, n) => (
+                  <Text key={`cost-${p.id}-${n}`} dimColor wrap="truncate">
+                    {line}
+                  </Text>
+                ))}
+              </Box>
+            ) : null}
             <Text dimColor>{`${String(pct).padStart(3, FIGURE_SPACE)}%`}</Text>
             <Button key={`close-${p.id}`} plain dimColor label="✕" onPress={() => dropPlan($, p.id)} />
           </Box>,
