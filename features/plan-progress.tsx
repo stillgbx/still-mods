@@ -28,7 +28,9 @@ const TRACK_H = 22
 const NARROW = 360
 
 // how hard the module holds the model to its bars, the planEnforcement option:
-// strict refuses a call and sends a turn back, soft only reminds, off leaves the bars to the model
+// strict refuses a call and sends a turn back; soft refuses nothing but reminds early, again and
+// again while no bar is open, and carries a forgotten bar over to the next prompt; off leaves the
+// bars to the model
 export type Enforcement = 'strict' | 'soft' | 'off'
 let enforcement: Enforcement = 'soft'
 // the labels' language: the language option, else read at session.start
@@ -703,6 +705,13 @@ const STEP_SCHEMA = {
 const WORK_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell'])
 const WORK_BEFORE_PLAN = 3 // the 4th changing call without a plan is refused once
 const CALLS_BEFORE_NUDGE = 6 // working calls without a plan update before a reminder
+// soft: the 2nd changing call without a bar brings the first reminder, then every 2nd, at most 3 a turn
+const SOFT_FIRST = 2
+const SOFT_EVERY = 2
+const SOFT_MAX = 3
+// a reminder the model can act on at once: the tool may be deferred, its schema not loaded yet
+const askForBar = (changes: number) =>
+  `still-mods: ${changes} changes in this turn and no progress bar. Create one now with ${TOOL} (load it first with ToolSearch "select:${TOOL}" if it is deferred), then go on.`
 
 
 export function registerPlanProgress(on: Parameters<Register>[0], options: { enforcement?: Enforcement; language?: string; sounds?: SoundTheme; palette?: PaletteName }) {
@@ -729,6 +738,9 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   let isPlanTouched = false
   let hasRefused = false
   let isWaitingOnBackground = false
+  let reminders = 0
+  // soft: changes the last turn made without any bar, said once with the next prompt
+  let carried = 0
 
   on('turn.start', async ($, e, next) => {
     workCalls = 0
@@ -736,6 +748,7 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
     isPlanTouched = false
     hasRefused = false
     isWaitingOnBackground = false
+    reminders = 0
 
     return next(e)
   })
@@ -744,12 +757,17 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   // and the person answering clears any "needs input" without a model call
   on('prompt.submit', async ($, e, next) => {
     if (e.origin.kind !== 'composer') return next(e)
+    const lines: string[] = []
+    if (carried > 0) {
+      lines.push(`still-mods: your last turn made ${carried} changes without a progress bar. If this request takes several steps, create one with ${TOOL} before the first change.`)
+      carried = 0
+    }
     const list = await read($, plans)
     if (list.some(p => p.state === 'needs_input')) {
       await update($, plans, all => all.map(p => (p.state === 'needs_input' ? { ...p, state: 'running' as const, note: null } : p)))
     }
     const open = list.filter(p => p.state !== 'done' && p.id !== AGENTS)
-    if (open.length === 0) return next(e)
+    if (open.length === 0) return lines.length > 0 ? next({ ...e, context: [...(e.context ?? []), ...lines] }) : next(e)
     const line = `still-mods open bars: ${open
       .map(p => {
         const w = where(p)
@@ -757,7 +775,7 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
       })
       .join(', ')}`
 
-    return next({ ...e, context: [...(e.context ?? []), line] })
+    return next({ ...e, context: [...(e.context ?? []), ...lines, line] })
   })
 
   // watches the main loop's changing calls: refuses once when multi-step work starts without a bar,
@@ -787,8 +805,12 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
     if (ran.deny !== undefined || ran.isReadOnly) return ran
     workCalls += 1
     sinceUpdate += 1
-    // soft: the call ran, and the model is told once that a bar would fit
-    if (asksForBar) return { ...ran, context: [...(ran.context ?? []), `still-mods: several changes ahead, consider a bar with ${TOOL}.`] }
+    // soft: the call ran; while no bar is open the model is told, early and again, to create one
+    const isSoftDue = enforcement === 'soft' && !hasLivePlan && workCalls >= SOFT_FIRST && (workCalls - SOFT_FIRST) % SOFT_EVERY === 0 && reminders < SOFT_MAX
+    if (isSoftDue) {
+      reminders += 1
+      return { ...ran, context: [...(ran.context ?? []), askForBar(workCalls)] }
+    }
     if (enforcement !== 'off' && hasLivePlan && sinceUpdate >= CALLS_BEFORE_NUDGE) {
       sinceUpdate = 0
 
@@ -802,6 +824,10 @@ export function registerPlanProgress(on: Parameters<Register>[0], options: { enf
   // only a turn that did work and left the bar unexplained is sent back once
   on('classic.Stop', async ($, e, next) => {
     const result = await next(e)
+    // soft: a turn that changed several things with no bar at all is recalled with the next prompt
+    if (enforcement === 'soft' && !result.block) {
+      carried = !isPlanTouched && workCalls >= WORK_BEFORE_PLAN && !(await read($, plans)).some(isOpenPlan) ? workCalls : 0
+    }
     if (e.stop_hook_active || result.block || isWaitingOnBackground || (e.background_tasks?.length ?? 0) > 0) return result
     const open = (await read($, plans)).filter(isOpenPlan)
     if (open.length === 0) return result

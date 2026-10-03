@@ -16,14 +16,16 @@ Other options:
 
 - `planEnforcement` (default `soft`): how hard Claude is held to its bars.
   - `strict`: a 4th change without a bar is refused once, a stale bar gets a reminder, and a turn that ends with an open bar is sent back.
-  - `soft`: reminders only, nothing is refused or sent back.
+  - `soft`: nothing is refused or sent back, but the 2nd change without a bar brings a reminder, repeated every 2nd change (at most 3 a turn) until a bar is open; a turn that made several changes with no bar is recalled with the next prompt.
   - `off`: no reminders; Claude uses the bars when it finds them useful.
 - `sounds` (`soft`, `classic`, `off`; default `soft`): the sounds when a bar waits for a decision,
   fails or finishes. `soft` is still-mods' own (made by `tools/make-sounds.py`), `classic` plan-progress'.
 - `agentsPane` (`auto`, `manual`, `off`; default `auto`): `auto` opens the Agents pane when a subagent
   starts, `manual` only with `/still-mods-agents`.
 - `agentsSessionsDir` (default `_generated-ai-doc/sessions`): the folder, from the project root, that
-  holds the team's session folders; the pane shows the newest one's `journal.md`.
+  holds the team's session folders; the pane shows the newest one's `journal.md`. A project without
+  that folder, or the option left empty, gets no session header and no journal; everything else works
+  for any subagent.
 - `timeZone` (default `Europe/Paris`), the zone of the 5-hour reset time.
 - `palette` (default `default`): the colours of the bars and meters, see [Palettes](#palettes).
 - `language` (`auto`, `en`, `fr`; default `auto`): the labels' language. `auto` follows Claude Code's `language` setting, then the system locale.
@@ -102,10 +104,10 @@ it as it works. Up to 5 bars show at once; past that, finished ones go first.
   its agents and what came back.
 - **Session log**: spawns, `SendMessage`s, answers, approvals waited on and failures, with the time;
   an agent's tool calls dimmed.
-- **Session folder**: the newest folder under `agentsSessionsDir`, and which role files it holds
-  (`brief.md`, `contrat.md`, `test.md`, `revue-ui.md`).
-- **Team journal**: the newest entries of its `journal.md`, read every 4 seconds, one per line as
-  `HH:MM · role · type · #tag text`; `bloque`, `decision` and `resultat` are coloured.
+- **Session folder**, when the project keeps one: the newest folder under `agentsSessionsDir`, and
+  which role files it holds (`brief.md`, `contrat.md`, `test.md`, `revue-ui.md`).
+- **Team journal**, with it: the newest entries of its `journal.md`, read every 4 seconds, one per
+  line as `HH:MM · role · type · #tag text`; `bloque`, `decision` and `resultat` are coloured.
 
 The desktop Code tab draws the main thread and the blocks as a graph (an SVG picture, in the
 `palette`'s colours: Opus in the waiting colour, Sonnet in the marker's, Haiku in the success

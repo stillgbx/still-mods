@@ -1,6 +1,8 @@
 // The Agents pane: the main thread and the subagents of this session, what each one runs on and does,
-// what they say to each other, and the journal of the team's session folder
-// (`<sessions dir>/<newest session>/journal.md`, one line per entry, `HH:MM · role · type · #tag text`).
+// what they say to each other, and, when the project keeps one, the journal of the team's session
+// folder (`<sessions dir>/<newest session>/journal.md`, one line per entry,
+// `HH:MM · role · type · #tag text`). A project without that folder, or with the option empty, gets
+// no session header and no team journal: the rest works for any subagent.
 // Agents come from the engine's own events; the journal is read from disk every few seconds, so it
 // shows entries written by any session. Surfaces that draw `Svg` (the desktop Code tab) get a graph
 // of the agents; the terminal gets one row per agent.
@@ -76,6 +78,7 @@ const toolUses = new Map<string, string>() // tool_use_id -> agentId ('main' for
 let selected: string | null = null // whose exchanges are shown: an agent id or 'main'
 let exchanges: { id: string; stamp: string; list: Exchange[] } | null = null
 let session: Session = null
+let demoSession: Session = null
 let journalStamp = ''
 let hasAutoOpened = false
 
@@ -89,7 +92,6 @@ const TEXT = {
     opened: 'Agents pane opened.',
     closed: 'Agents pane closed.',
     noAgents: 'No agent started in this session yet.',
-    noSession: (dir: string) => `No session folder in ${dir}.`,
     journal: 'Team journal',
     emptyJournal: 'Journal empty.',
     states: { running: 'running', waiting: 'waiting', done: 'done', error: 'failed', stopped: 'stopped' } as Record<AgentState, string>,
@@ -123,7 +125,6 @@ const TEXT = {
     opened: 'Panneau Agents ouvert.',
     closed: 'Panneau Agents fermé.',
     noAgents: 'Aucun agent lancé dans cette session pour l’instant.',
-    noSession: (dir: string) => `Aucun dossier de session dans ${dir}.`,
     journal: 'Journal de l’équipe',
     emptyJournal: 'Journal vide.',
     states: { running: 'en cours', waiting: 'en attente', done: 'terminé', error: 'échec', stopped: 'arrêté' } as Record<AgentState, string>,
@@ -170,7 +171,7 @@ export function registerAgents(
   options: { mode?: AgentsMode; sessionsDir?: string; language?: string; palette?: PaletteName; timeZone?: string },
 ) {
   mode = options.mode ?? 'auto'
-  if (options.sessionsDir) sessionsDir = options.sessionsDir.replace(/\\/g, '/').replace(/\/+$/, '')
+  if (options.sessionsDir !== undefined) sessionsDir = options.sessionsDir.trim().replace(/\\/g, '/').replace(/\/+$/, '')
   language = options.language ?? 'auto'
   colors = palette(options.palette)
   if (options.timeZone) timeZone = options.timeZone
@@ -340,14 +341,14 @@ export function registerAgents(
     const groups = typeGroups()
     const roleWidth = Math.max(9, ...list.map(a => [...a.role].length), ...groups.flatMap(g => g.blocks.map(b => [...b.short].length)))
 
-    const header = session ? (
+    // the team's session folder, when the project keeps one (or the demo's)
+    const team = demo ? demoSession : session
+    const header = team ? (
       <Box key="head" flexDirection="row" justifyContent="space-between" columnGap={2}>
-        <Text bold wrap="truncate">{session.name}</Text>
-        <Text dimColor>{ROLE_FILES.map(f => `${f.replace(/\.md$/, '')} ${session?.files.includes(f) ? '✓' : '·'}`).join('  ')}</Text>
+        <Text bold wrap="truncate">{team.name}</Text>
+        <Text dimColor>{ROLE_FILES.map(f => `${f.replace(/\.md$/, '')} ${team.files.includes(f) ? '✓' : '·'}`).join('  ')}</Text>
       </Box>
-    ) : (
-      <Text key="head" dimColor>{T().noSession(sessionsDir)}</Text>
-    )
+    ) : null
 
     // the graph where the surface draws vectors, one row per agent elsewhere
     let agentsView
@@ -412,9 +413,9 @@ export function registerAgents(
     const shown = selected === MAIN || (selected && agents.has(selected)) ? selected : null
     const exchangeView = shown ? await exchangeBox($, { Box, Text }, shown, roleWidth) : null
 
-    // the newest entries first, the session log and the journal sharing the rows left
+    // the newest entries first, the session log and the journal (when there is one) sharing the rows left
     const used = (Svg ? graphRows : groups.reduce((n, g) => n + g.blocks.length + 1, 2)) + (exchangeView ? 14 : 0) + 8
-    const room = Math.max(3, Math.floor((rows - used) / 2))
+    const room = Math.max(3, Math.floor((rows - used) / (team ? 2 : 1)))
     const logRows =
       log.length === 0
         ? [<Text key="nolog" dimColor>{T().emptyLog}</Text>]
@@ -432,7 +433,7 @@ export function registerAgents(
               </Box>
             ))
 
-    const journal = session?.journal ?? []
+    const journal = team?.journal ?? []
     const journalRows =
       journal.length === 0
         ? [<Text key="nojournal" dimColor>{T().emptyJournal}</Text>]
@@ -469,10 +470,12 @@ export function registerAgents(
           <Text bold>{T().sessionLog}</Text>
           {logRows}
         </Box>
-        <Box key="journal" flexDirection="column">
-          <Text bold>{T().journal}</Text>
-          {journalRows}
-        </Box>
+        {team ? (
+          <Box key="journal" flexDirection="column">
+            <Text bold>{T().journal}</Text>
+            {journalRows}
+          </Box>
+        ) : null}
       </Box>
     )
   })
@@ -911,6 +914,7 @@ const esc = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').
 
 // reads the newest session folder; true when what the pane shows changed
 async function readSession($: EngineInterface): Promise<boolean> {
+  if (!sessionsDir) return replaceSession(null, '')
   const root = `${await $.session.cwd()}/${sessionsDir}`.replace(/\\/g, '/')
   try {
     if (!(await $.fs.exists(root))) return replaceSession(null, '')
@@ -1038,6 +1042,7 @@ function toggleDemo($: EngineInterface) {
   if (demo) {
     demo.timer.cancel()
     demo = null
+    demoSession = null
     agents = liveAgents
     main = liveMain
     declared = liveDeclared
@@ -1053,6 +1058,7 @@ function toggleDemo($: EngineInterface) {
 async function startDemo($: EngineInterface) {
   const now = await $.clock.now()
   const types = demoTypes()
+  demoSession = demoTeam(now)
   agents = new Map()
   declared = new Map(types.map(t => [t.name, { name: t.name, description: t.description, model: t.model, source: t.source }]))
   log = []
@@ -1155,4 +1161,30 @@ async function demoTick($: EngineInterface) {
 function demoLog(entry: LogEntry) {
   log.push(entry)
   if (log.length > DEMO_LOG_KEPT) log.splice(0, log.length - DEMO_LOG_KEPT)
+}
+
+// the demo's session folder: its role files and a journal as a team would write it
+function demoTeam(now: number): Session {
+  const fr = locale === 'fr'
+  const at = (minutesAgo: number) => clockTime(now - minutesAgo * 60_000).slice(0, 5)
+  const lines: [number, string, string, string][] = fr
+    ? [
+        [42, 'lead', 'decision', '#arrondi on passe les montants en centimes entiers'],
+        [35, 'architect', 'info', '#money type Money partagé proposé dans contrat.md'],
+        [21, 'tester', 'bloque', '#tests invoice.test.ts dépend de l’arrondi flottant'],
+        [12, 'dev', 'info', '#arrondi invoice.ts et tax.ts passent par Money'],
+        [4, 'tester', 'resultat', '#tests 128 tests passent, 0 en échec'],
+      ]
+    : [
+        [42, 'lead', 'decision', '#rounding amounts move to integer cents'],
+        [35, 'architect', 'info', '#money a shared Money type, proposed in contrat.md'],
+        [21, 'tester', 'bloque', '#tests invoice.test.ts relies on float rounding'],
+        [12, 'dev', 'info', '#rounding invoice.ts and tax.ts go through Money'],
+        [4, 'tester', 'resultat', '#tests 128 tests pass, 0 failing'],
+      ]
+  return {
+    name: fr ? '2026-10-03-arrondi-factures' : '2026-10-03-invoice-rounding',
+    files: ['brief.md', 'contrat.md', 'test.md', 'journal.md'],
+    journal: lines.map(([m, role, type, text]) => ({ time: at(m), role, type, text })),
+  }
 }

@@ -49,7 +49,7 @@ const FIELDS: Field[] = [
     name: 'agentsSessionsDir',
     kind: 'text',
     fallback: '_generated-ai-doc/sessions',
-    label: { en: 'Team session folders, from the project', fr: 'Dossiers de session de l’équipe, depuis le projet' },
+    label: { en: 'Team session folders, from the project (empty: none)', fr: 'Dossiers de session de l’équipe, depuis le projet (vide : aucun)' },
   },
   {
     name: 'palette',

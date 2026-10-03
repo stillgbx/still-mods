@@ -18,3 +18,6 @@ desktop.ini
 
 # written by /still-mods to reload the plugin
 .reload-stamp
+
+# a team's session folders (agentsSessionsDir), kept by each project, read by the Agents pane
+_generated-ai-doc/

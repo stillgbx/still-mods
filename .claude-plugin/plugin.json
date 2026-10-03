@@ -17,7 +17,7 @@
     "planEnforcement": {
       "type": "string",
       "title": "Plan bar enforcement",
-      "description": "strict: refuse changes and send the turn back until the bar is updated; soft: reminders only; off: bars only when Claude finds them useful",
+      "description": "strict: refuse changes and send the turn back until the bar is updated; soft: reminders from the 2nd change, repeated while no bar is open, and recalled at the next prompt, nothing refused; off: bars only when Claude finds them useful",
       "options": [
         "strict",
         "soft",
@@ -50,7 +50,7 @@
     "agentsSessionsDir": {
       "type": "string",
       "title": "Team session folders",
-      "description": "Folder of the team's session folders, from the project root; the newest one's journal.md is shown",
+      "description": "Folder of the team's session folders, from the project root; the newest one's journal.md is shown. Empty, or a project without it: no session header and no journal",
       "default": "_generated-ai-doc/sessions"
     },
     "turnNotify": {
