@@ -99,6 +99,12 @@ cache has left since that response, draining, orange in its last 15 %: `chaud ·
 once it expired, when the next message writes the whole context to the cache again. The lifetime is
 the `cacheTtl` option (`1h` by default, or `5m`): the engine does not say it at any time.
 
+Hovering a meter shows a card that explains it: the context's tokens and the session's cost; a limit's
+window, its share used against the time gone and what that pace means, its reset and how to read the
+bar; the cache's hit rate, when the last response came and when the cache expires. The surface shows
+and hides the card itself (no hook runs); there is none without a pointer (a terminal without a mouse,
+the mobile app).
+
 The blue line is the time gone in the window. A fill short of it means the limit lasts until the
 reset; a fill past it means usage runs ahead of time. The colour says the same: green at least 10
 points behind the line (or under 10 % used), orange close to it or a little past, red more than 15

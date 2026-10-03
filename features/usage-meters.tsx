@@ -61,6 +61,10 @@ const SVG_BAR_HEIGHT = 12
 let usesPalette = false
 const SVG_COLORS: Record<string, string> = { success: '#4caf50', warning: '#e0a526', error: '#e5534b', track: 'rgba(128,128,128,0.3)', marker: '#5b9bff', tick: 'rgba(0,0,0,0.38)' }
 const MARKER_COLOR = 'cyan'
+// the hover card's background: a raw colour close to the band's in the app's dark theme (a theme key
+// the surface does not know makes it refuse the whole band)
+const CARD_BACKGROUND = '#2b2b2b'
+const CARD_MIN_CELLS = 40
 
 type Meter = {
   key: string
@@ -73,6 +77,8 @@ type Meter = {
   percent?: string
   status?: string | null
   barStatus?: string
+  // the lines of the card shown over the meter while the pointer is on it
+  card?: string[]
 }
 
 // the main thread's prompt cache: the share of the last response's input it served, and when that
@@ -175,12 +181,12 @@ async function usageMeters($: EngineInterface, e: any): Promise<any> {
   const elements: any = $.ui.resolve(e)
   const now = await $.clock.now()
   const L = strings(locale)
-  const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail(), ticks: CONTEXT_TICKS }]
+  const meters: Meter[] = [{ key: 'ctx', label: L.ctx, used: context?.percent, elapsed: null, detail: contextDetail(), ticks: CONTEXT_TICKS, card: contextCard() }]
   if (cacheShown) meters.push(cacheMeter(now))
   for (const limit of rateLimits) meters.push(readLimit(limit, now))
   // the windows arrive with the first API response; until then they show as unknown
   for (const kind of ALWAYS_SHOWN) {
-    if (!rateLimits.some(l => l.kind === kind)) meters.push({ key: kind, label: titleOf(kind), used: undefined, elapsed: null, detail: L.waiting })
+    if (!rateLimits.some(l => l.kind === kind)) meters.push({ key: kind, label: titleOf(kind), used: undefined, elapsed: null, detail: L.waiting, card: [windowTitle(kind), L.cardWaiting] })
   }
   const columns = e.props.bodyColumns ?? 0
   const room = columns - BAND_RESERVED_COLUMNS
@@ -279,7 +285,43 @@ function readLimit(limit: any, now: number): Meter {
   if (resetsAtMs != null && resetsAtMs <= now) return { key: limit.kind, label, used: 0, elapsed: window?.ms ? 0 : null, detail: '', ticks: divisionPoints(window?.divisions) }
   const elapsed = window?.ms && resetsAtMs != null ? clamp(100 - ((resetsAtMs - now) / window.ms) * 100) : null
   const detail = resetsAtMs == null ? '' : strings(locale).resetsIn(untilReset(resetsAtMs - now)) + ' · ' + resetClock(resetsAtMs, window?.showsDay === true)
-  return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail, ticks: divisionPoints(window?.divisions) }
+  const card = limitCard(limit.kind, limit.percentUsed, elapsed, resetsAtMs, now)
+  return { key: limit.kind, label, used: limit.percentUsed, elapsed, detail, ticks: divisionPoints(window?.divisions), card }
+}
+
+// what a limit's card says: the window, the share used against the time gone and what that pace
+// means, the reset, and how to read the bar
+function limitCard(kind: string, used: number, elapsed: number | null, resetsAtMs: number | null, now: number) {
+  const L = strings(locale)
+  const lines = [windowTitle(kind)]
+  if (elapsed != null) {
+    const margin = elapsed - used
+    const pace = margin >= GREEN_MIN_MARGIN ? 'under' : margin < RED_BELOW_MARGIN ? 'over' : 'near'
+    lines.push(`${L.cardUsed(Math.round(used) + '%', Math.round(elapsed) + '%')} · ${L.cardPace[pace]}`)
+  } else {
+    lines.push(Math.round(used) + '%')
+  }
+  if (resetsAtMs != null) lines.push(L.cardReset(resetClock(resetsAtMs, WINDOWS[kind]?.showsDay === true), untilReset(resetsAtMs - now)))
+  if (kind === 'five_hour') lines.push(L.cardTicksHours)
+  if (kind === 'seven_day') lines.push(L.cardTicksDays)
+  return lines
+}
+
+function windowTitle(kind: string) {
+  const L = strings(locale)
+  return kind === 'five_hour' ? L.cardFiveHour : kind === 'seven_day' ? L.cardSevenDay : titleOf(kind)
+}
+
+// what the context's card says: the tokens in the window, the session's cost, the cuts
+function contextCard() {
+  const L = strings(locale)
+  if (!context?.window) return [L.cardCtxNone]
+  const pct = typeof context.percent === 'number' ? Math.round(context.percent) + '%' : '—'
+  const tokens = typeof context.tokens === 'number' ? formatTokens(context.tokens) : '—'
+  const lines = [L.cardCtx(tokens, formatTokens(context.window), pct)]
+  if (costUsd != null) lines.push(L.cardCost(formatUsd(locale, costUsd)))
+  lines.push(L.cardCtxTicks)
+  return lines
 }
 
 // the cache column: its hit rate as the figure, the time it has left as the bar, which drains
@@ -287,11 +329,18 @@ function cacheMeter(now: number): Meter {
   const L = strings(locale)
   const rate = cacheRate == null ? '—' : Math.round(cacheRate) + '%'
   const rateStatus = cacheRate == null ? null : cacheRate >= 80 ? 'success' : cacheRate >= 50 ? 'warning' : 'error'
-  if (lastResponseAt == null) return { key: 'cache', label: L.cache, used: undefined, elapsed: null, detail: L.waiting, percent: rate, status: rateStatus }
+  const tokens = typeof context?.tokens === 'number' ? formatTokens(context.tokens) : null
+  if (lastResponseAt == null) return { key: 'cache', label: L.cache, used: undefined, elapsed: null, detail: L.waiting, percent: rate, status: rateStatus, card: [L.cardCacheNone] }
+  const at = resetClock(lastResponseAt, false)
   const left = lastResponseAt + cacheTtlMs - now
-  if (left <= 0) return { key: 'cache', label: L.cache, used: 0, elapsed: null, detail: L.cold, percent: rate, status: rateStatus }
+  if (left <= 0) {
+    const card = [L.cardCacheRate(rate), L.cardCacheCold(at), ...(tokens ? [L.cardCacheNext(tokens)] : [])]
+    return { key: 'cache', label: L.cache, used: 0, elapsed: null, detail: L.cold, percent: rate, status: rateStatus, card }
+  }
   const share = (left / cacheTtlMs) * 100
+  const card = [L.cardCacheRate(rate), L.cardCacheWarm(at, resetClock(lastResponseAt + cacheTtlMs, false), untilReset(left)), ...(tokens ? [L.cardCacheNext(tokens)] : [])]
   return {
+    card,
     key: 'cache',
     label: L.cache,
     used: share,
@@ -395,7 +444,27 @@ function meter({ Box, Text, Svg }: any, gauge: string, cells: number, m: Meter) 
           height: SVG_BAR_HEIGHT,
         })
       : textBar(Text, cells, known ? used : 0, elapsed, barStatus, ticks)
-  return Box({ key: 'meter-' + key, flexDirection: 'column', width: cells, flexShrink: 0, children: [head, bar] })
+  const children = [head, bar]
+  if (m.card && m.card.length > 0) children.push(hoverCard(Box, Text, m.card, cells))
+  return Box({ key: 'meter-' + key, flexDirection: 'column', width: cells, flexShrink: 0, children })
+}
+
+// a card for the meter, drawn hidden and shown by the surface while the pointer is on the meter's
+// keyed box: no hook runs. The desktop draws it as a floating card over the band, with its own border
+function hoverCard(Box: any, Text: any, lines: string[], cells: number) {
+  // no key of its own: a keyed Box is its own hover scope, and a hidden one can never be hovered
+  return Box({
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: Math.max(cells, CARD_MIN_CELLS),
+    display: 'none',
+    hover: { display: 'flex' },
+    flexDirection: 'column',
+    paddingX: 1,
+    backgroundColor: CARD_BACKGROUND,
+    children: lines.map((line, i) => Text({ key: `card-${i}`, wrap: 'wrap', ...(i === 0 ? { bold: true } : {}), children: [line] })),
+  })
 }
 
 // used cells in the status color, the rest dim, and the time marker
