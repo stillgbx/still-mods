@@ -16,7 +16,7 @@ export const register: Register = (on, options) => {
   registerSettings(on, options as Record<string, unknown>)
   // a missing value means on, the manifest's default
   if (opts.planProgress !== false) registerPlanProgress(on, { enforcement: opts.planEnforcement, language: opts.language, sounds: opts.sounds, palette: opts.palette })
-  if (opts.agentsPane !== 'off') registerAgents(on, { mode: opts.agentsPane, sessionsDir: opts.agentsSessionsDir, language: opts.language })
+  if (opts.agentsPane !== 'off') registerAgents(on, { mode: opts.agentsPane, sessionsDir: opts.agentsSessionsDir, language: opts.language, palette: opts.palette, timeZone: opts.timeZone })
   if (opts.turnNotify !== false) registerTurnNotify(on, { seconds: opts.turnNotifySeconds, sounds: opts.sounds, language: opts.language })
   if (opts.gitStatus !== false) registerGitStatus(on, { language: opts.language })
   if (opts.usageMeters !== false) registerUsageMeters(on, { timeZone: opts.timeZone, language: opts.language, palette: opts.palette, cacheMeter: opts.cacheMeter, cacheTtl: opts.cacheTtl })
