@@ -1,5 +1,7 @@
 # still-mods
 
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/stillgbx)
+
 Personal Claude Code mods, in one plugin. Each feature can be switched on or off on its own.
 
 ![Plan bars with their costs over the context, cache, session and weekly meters, in Claude Desktop](docs/screenshot.png)
